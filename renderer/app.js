@@ -827,8 +827,9 @@ async function renderSettings() {
             if (revision !== renderVersion) return;
             const done = r.backups.filter(b => b.status === "re-encrypted").length;
             const skipped = r.backups.filter(b => b.status !== "re-encrypted");
-            const lines = [ "Rotated.", `  vault re-encrypted under the new password`, `  ${STORE_NAMES[r.keyring.store] || r.keyring.store} entry updated`, `  ${done} backup${done === 1 ? "" : "s"} re-encrypted` ];
-            for (const b of skipped) lines.push(`  ${b.file}: ${b.status} — delete it yourself`);
+            const lines = [ "Rotated.", `  vault re-encrypted under the new password`, `  ${STORE_NAMES[r.keyring.store] || r.keyring.store}: ${r.keyring.updated ? "updated" : "not saved"}`, `  ${done} backup${done === 1 ? "" : "s"} re-encrypted` ];
+            lines.push(...(r.warnings || []));
+            for (const b of skipped) lines.push(`  ${b.file}: ${b.status}`);
             lines.push("", "The vault now uses your new password. External backup copies are unchanged.");
             pwOut.textContent = lines.join("\n");
             pwOut.style.display = "block";

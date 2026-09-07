@@ -125,40 +125,38 @@ class Store {
         }
         M.assertReadable(current);
         if (!this.isUnlocked()) this.unlock(oldPassword);
-        this.password = newPassword;
-        this.persist();
-        this.keyring.clear();
-        const keyring = this.vault.settings.rememberPassword === true ? this.keyring.set(newPassword) : this.keyring.describe();
-        const backups = [];
-        const dir = path.join(this.dataDir, "backups");
-        if (reencryptBackups && fs.existsSync(dir)) {
-            for (const name of fs.readdirSync(dir)) {
-                const file = path.join(dir, name);
-                if (!fs.statSync(file).isFile()) continue;
-                let data;
-                try {
-                    data = decryptVault(JSON.parse(fs.readFileSync(file, "utf8")), oldPassword);
-                } catch {
-                    backups.push({
-                        file: name,
-                        status: "skipped (not readable with the old password)"
-                    });
-                    continue;
-                }
-                atomicWrite(file, JSON.stringify(encryptVault(data, newPassword)));
-                backups.push({
-                    file: name,
-                    status: "re-encrypted"
-                });
+        const previousPassword=this.password;
+        this.password=newPassword;
+        try { this.persist(); }
+        catch(error){
+            const unchanged=this.exists() && createHash('sha256').update(fs.readFileSync(this.vaultPath)).digest('hex')===this.diskHash;
+            if(unchanged)this.password=previousPassword;else this.lock();
+            throw error;
+        }
+        const warnings=[];
+        let keyring={...this.keyring.describe(),updated:false};
+        try{
+            this.keyring.clear();
+            if(this.vault.settings.rememberPassword===true)keyring={...this.keyring.set(newPassword),updated:true};
+        }catch{warnings.push('The vault uses the new password, but Keychain could not be updated. Disable background access and retry in an unlocked login session.');}
+        const backups=[];
+        const dir=path.join(this.dataDir,'backups');
+        if(reencryptBackups && fs.existsSync(dir)){
+            for(const name of fs.readdirSync(dir)){
+                const file=path.join(dir,name);
+                try{
+                    regularFile(file);
+                    const data=decryptVault(JSON.parse(fs.readFileSync(file,'utf8')),oldPassword);
+                    atomicWrite(file,JSON.stringify(encryptVault(data,newPassword)));
+                    backups.push({file:name,status:'re-encrypted'});
+                }catch{backups.push({file:name,status:'not re-encrypted; preserve the old password and inspect this backup'});}
             }
         }
-        this.audit("rotate_master_password", `backups re-encrypted: ${backups.filter(b => b.status === "re-encrypted").length}`, M.HUMAN);
-        return {
-            ok: true,
-            keyring: keyring,
-            backups: backups
-        };
+        try{this.audit('rotate_master_password',`backups re-encrypted: ${backups.filter(b=>b.status==='re-encrypted').length}`,M.HUMAN);}
+        catch{warnings.push('The vault uses the new password, but the audit event could not be written.');}
+        return {ok:true,keyring,backups,warnings};
     }
+
     blockAutoUnlock() {
         atomicWrite(path.join(this.dataDir, "locked"), "Human unlock required");
     }

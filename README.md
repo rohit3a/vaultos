@@ -8,7 +8,7 @@ VaultOS is a local desktop vault with an MCP bridge. Organize credentials by pro
 
 > **Unsigned preview:** early software for evaluation, without Developer ID signing or Apple notarization. Start with test credentials and keep independent backups. Security regression tests are included; this project has not received an independent security audit.
 
-![VaultOS showing a synthetic example credential](docs/images/vaultos-preview.png)
+<img src="docs/images/vaultos-preview.png" alt="VaultOS showing a synthetic example credential" width="480">
 
 ## Why use it?
 

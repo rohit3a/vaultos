@@ -164,3 +164,16 @@ test("undo refuses stale history and creates a durable deletion", t => {
     assert(!store.listSecrets("Example").some(x => x.key === "TEMP"));
     assert(store.vault.tombstones.length);
 });
+
+test('failed rotation cannot silently change the next write password', t => {
+    const {store}=fixture(t);const lock=path.join(store.dataDir,'write.lock');
+    fs.writeFileSync(lock,String(process.pid));
+    assert.throws(()=>store.changePassword(PW,'synthetic-new-password'),/Another/);
+    fs.unlinkSync(lock);store.setSecret('Example',{key:'AFTER',value:'still-old-password'});
+    assert.equal(decryptVault(JSON.parse(fs.readFileSync(store.vaultPath)),PW).projects[0].secrets[0].value,'still-old-password');
+});
+test('rotation reports a Keychain failure while completing backup re-encryption',t=>{
+    const {store}=fixture(t);const dir=path.join(store.dataDir,'backups');fs.mkdirSync(dir);const backup=path.join(dir,'previous.enc');fs.copyFileSync(store.vaultPath,backup);
+    store.keyring={describe:()=>({store:'unavailable'}),clear:()=>{throw new Error('synthetic unavailable');}};
+    const result=store.changePassword(PW,'synthetic-new-password');assert.equal(result.warnings.length,1);assert.equal(result.backups[0].status,'re-encrypted');assert(decryptVault(JSON.parse(fs.readFileSync(backup)),'synthetic-new-password'));
+});
