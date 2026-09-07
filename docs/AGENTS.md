@@ -41,6 +41,10 @@ Agents cannot enroll, widen scopes or folders, approve their own records, adopt 
 
 `inject_secrets` supports dotenv, JSON, and shell formats. JSON merge preserves unrelated object keys. Dotenv merge preserves unrelated variables but rewrites formatting/comments. Shell output requires `merge:false` and must be sourced deliberately by the target program. An explicitly empty key list exports no keys; omitted keys requests all permitted, approved records.
 
+## Optional background helper
+
+The bridge works with the downloaded desktop while the app is open and unlocked. To let the source bridge start its headless backend after the desktop closes, also run `npm run build:native` in that source checkout on macOS (requires command-line developer tools). This builds the same preview-namespaced Keychain helper locally. Without it, keep the desktop open; the bridge never falls back to a plaintext password file. Background access must still be enabled deliberately in desktop Settings.
+
 ## Locked or unavailable
 
 Unlock the desktop. The bridge can start the backend only when background Keychain access was explicitly enabled and a human lock has not blocked it. A connection interruption after a write is ambiguous: inspect the result before retrying. The bridge does not blindly replay writes.
