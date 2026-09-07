@@ -19,7 +19,7 @@ Keep authorization in the main process/API, never only in renderer controls. Tre
 
 ## Releases
 
-The checked-in macOS workflow builds and uploads both architecture artifacts after tests. It does not publish a release automatically on pull requests. To publish, create a reviewed version tag and dispatch the release workflow for that exact tag. The workflow rejects nonmatching version tags and attaches unsigned ZIPs, checksums, and dependency inventory to a GitHub prerelease.
+The checked-in macOS workflow tests the source and packaged application on Apple Silicon (macOS 14) and Intel (macOS 15), then uploads both architecture artifacts. It does not publish a release automatically on pull requests. To publish, create a reviewed version tag and dispatch the release workflow for that exact tag. The workflow rejects nonmatching version tags and attaches unsigned ZIPs, checksums, and dependency inventory to a GitHub prerelease.
 
 For a local build, use a clean checkout with the lockfile, run checks on Linux and macOS, build both architectures, then verify the ZIP checksums, package inventory, and launch on supported hardware. Confirm that only synthetic screenshots are included and no runtime vault files, tokens, signing credentials, personal build paths or private history are in the source or artifacts. Record which architectures and OS versions were actually exercised; a cross-build is not a runtime test.
 

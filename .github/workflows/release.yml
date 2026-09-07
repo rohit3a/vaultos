@@ -10,10 +10,14 @@ permissions:
   contents: read
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        arch: [arm64, x64]
+        include:
+          - arch: arm64
+            os: macos-14
+          - arch: x64
+            os: macos-15-intel
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -33,8 +37,7 @@ jobs:
       - run: npm run dist:mac
         env:
           VAULTOS_ARCH: ${{ matrix.arch }}
-      - if: matrix.arch == 'arm64'
-        run: node scripts/test-packaged.mjs
+      - run: node scripts/test-packaged.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unsigned-${{ matrix.arch }}

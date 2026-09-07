@@ -29,11 +29,15 @@ jobs:
           /tmp/gitleaks dir . --redact --no-banner
 
   macos:
-    runs-on: macos-14
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [arm64, x64]
+        include:
+          - arch: arm64
+            os: macos-14
+          - arch: x64
+            os: macos-15-intel
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -49,7 +53,6 @@ jobs:
         env:
           VAULTOS_ARCH: ${{ matrix.arch }}
       - name: Smoke-test native packaged app
-        if: matrix.arch == 'arm64'
         run: node scripts/test-packaged.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
