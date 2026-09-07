@@ -1,5 +1,9 @@
 # Connect a coding agent
 
+For an agent-readable installation and management playbook, start at
+[the portable VaultOS skill](../skills/vaultos/SKILL.md). Copy its whole folder
+when installing it in a skill-aware client; this page is the shorter manual setup guide.
+
 The desktop manages authorization. The MCP bridge forwards calls to its localhost API. You need Node.js 22+ and a source checkout with `npm ci --omit=dev --ignore-scripts` for the bridge; the desktop ZIP alone does not install a global MCP command.
 
 1. Open and unlock VaultOS Preview. Create a project and a disposable test key.

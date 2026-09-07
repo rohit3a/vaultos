@@ -138,14 +138,14 @@ const server = new Server({
 
 const TOOLS = [ {
     name: "vault_status",
-    description: "Check that the vault backend is reachable, and report what is actually deployed: vault format version, the commit the CLI was installed from, and hashes of the running modules. Use this to tell a stale deployment from a current one.",
+    description: "Check backend availability and report vault format, backend deployment version, and bridge version. This does not authenticate the enrolled agent; use whoami to verify identity and grants.",
     inputSchema: {
         type: "object",
         properties: {}
     }
 }, {
     name: "list_projects",
-    description: "List all projects in the vault with how many keys each has and which providers (Supabase, Vercel, etc.) are present. Returns names and counts only, never secret values.",
+    description: "List projects approved for this agent, with key counts and providers. Requires read scope. Returns metadata, never secret values.",
     inputSchema: {
         type: "object",
         properties: {}
@@ -165,7 +165,7 @@ const TOOLS = [ {
     }
 }, {
     name: "create_project",
-    description: "Create a new project in the vault.",
+    description: "Create a new project in the vault. Requires add scope; the new project is approved for the creating agent.",
     inputSchema: {
         type: "object",
         properties: {
@@ -177,7 +177,7 @@ const TOOLS = [ {
     }
 }, {
     name: "set_secret",
-    description: "Add or update a secret in a project. You may ADD a new key to ANY project — put it where it belongs, next to related keys. You may NOT modify or delete a key owned by the user unless they delegated it to you; that is refused with an explanation. Keys you add are visible immediately but are held back from inject until the user approves them once. Provider is auto-detected from the key name if omitted.",
+    description: "Add or update a secret in an approved project. New keys require add scope; updates require edit:own or edit:delegated plus record delegation as applicable. Agent-created keys await human approval before injection. Provider is auto-detected if omitted. Values supplied here enter tool arguments; prefer human desktop entry or authorized import_env for existing real credentials.",
     inputSchema: {
         type: "object",
         properties: {
@@ -227,7 +227,7 @@ const TOOLS = [ {
     }
 }, {
     name: "delete_secret",
-    description: "Delete a secret from a project by key name.",
+    description: "Delete this agent's own secret from an approved project by key name. Requires delete:own scope; delegation does not allow deleting another owner's record.",
     inputSchema: {
         type: "object",
         properties: {
@@ -242,7 +242,7 @@ const TOOLS = [ {
     }
 }, {
     name: "inject_secrets",
-    description: "PREFERRED way to use secrets. The Vault OS app writes a project's secrets into a file on disk itself — the raw values never enter this conversation. Use this to wire up a project's .env. target_path must be absolute. format: dotenv (KEY=value), shell (export KEY=value), or json. By default merges into an existing file, preserving unrelated keys.",
+    description: "Preferred way to use secrets: write approved keys from an approved project into an absolute path inside an approved folder. Requires inject scope. The response omits values, but the output file is plaintext and readable by filesystem-capable agents. Select only needed keys. Dotenv/JSON merge defaults to true and preserves unrelated keys; dotenv formatting/comments are rewritten. Shell requires merge:false and replaces the file. Inspect counts and heldForApproval; do not read back values to verify success.",
     inputSchema: {
         type: "object",
         properties: {
@@ -274,7 +274,7 @@ const TOOLS = [ {
     }
 }, {
     name: "reveal_secret",
-    description: "Return one raw secret VALUE into this conversation. Requires the `reveal` scope, which agents do NOT hold by default — expect this to be refused, and prefer inject_secrets, which writes a working file without any value entering the conversation. Ask the user to grant `reveal` in the Vault OS app only when a value genuinely must be seen.",
+    description: "Return one raw secret value to the client/model from an approved project. Requires reveal scope, off by default. Prefer inject_secrets when the application needs a working file. Request human reveal access only when the user's task requires the raw value; do not escalate merely because injection was denied.",
     inputSchema: {
         type: "object",
         properties: {
@@ -322,13 +322,13 @@ const TOOLS = [ {
     }
 }, {
     name: "import_env",
-    description: "Import all KEY=VALUE pairs from a .env file on disk into a project. The app reads the file itself, so the secret values never enter this conversation. Auto-creates the project and auto-detects the provider per key. Use this to populate the vault from an existing project's .env / .env.local.",
+    description: "Import KEY=VALUE pairs from an absolute .env path inside an approved folder into an existing approved project. Requires add scope and applicable edit scopes/record delegation for updates. Does not auto-create projects. The app reads values without returning them in the tool response. Inspect keys and refused for partial success; new records await human injection approval.",
     inputSchema: {
         type: "object",
         properties: {
             project: {
                 type: "string",
-                description: "Project name to import into (created if missing)."
+                description: "Existing approved project name or id."
             },
             env_path: {
                 type: "string",

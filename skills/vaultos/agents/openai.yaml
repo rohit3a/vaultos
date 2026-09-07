@@ -1,0 +1,4 @@
+interface:
+  display_name: "VaultOS"
+  short_description: "Install, connect, and manage VaultOS safely"
+  default_prompt: "Use $vaultos to set up VaultOS and connect my coding agent with the access needed for my project."

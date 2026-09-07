@@ -66,6 +66,20 @@ VAULTOS_ARCH=x64 npm run dist:mac
 
 See [development and release instructions](CONTRIBUTING.md), [architecture](docs/ARCHITECTURE.md), and [optional sync](docs/SYNC.md).
 
+## Give your agent the instructions
+
+Point an agent at [AGENTS.md](AGENTS.md) or ask it to read
+[skills/vaultos/SKILL.md](skills/vaultos/SKILL.md). The skill covers macOS installation,
+MCP connection, grants, daily secret operations, updates, backups, and troubleshooting.
+For clients supporting Agent Skills, install the complete `skills/vaultos/` folder
+using the client's skill installation mechanism; keep its `references/` directory.
+Clients supporting named skill invocation can then use `$vaultos`.
+
+Example request: “Use the VaultOS skill to connect this agent to my preview vault
+with read and inject access to my project.” The skill provides instructions; the
+human still unlocks the vault and grants access in the desktop. It contains no
+credentials and does not automatically change client configuration.
+
 ## Project status
 
 This first public preview prioritizes a small, inspectable local workflow. Remaining release milestones include independent security review, Developer ID signing and notarization, broader macOS/Intel runtime coverage, accessibility review, and usability improvements to conflict resolution. No automatic updater is enabled; install future releases explicitly after backing up.
