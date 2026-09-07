@@ -66,6 +66,8 @@ try {
         extraResource: [ "build/native/vaultos-keychain" ]
     });
     const bundle = path.join(folder, "VaultOS Preview.app");
+    cpSync(path.join(folder,'LICENSE'),path.join(bundle,'Contents','Resources','LICENSE.electron'));
+    cpSync(path.join(folder,'LICENSES.chromium.html'),path.join(bundle,'Contents','Resources','LICENSES.chromium.html'));
     await flipFuses(bundle, {
         version: FuseVersion.V1,
         [FuseV1Options.RunAsNode]: false,

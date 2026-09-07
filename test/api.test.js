@@ -93,7 +93,16 @@ test("API enforces identity, scopes, project allowlists, path allowlists and loc
         target_path: path.join(dir, "project", ".env")
     })).json();
     assert(output.heldForApproval.includes("NEW"));
-    registry.revoke(agent.id);
+    const empty=await (await call('/inject',{project:'Allowed',target_path:path.join(dir,'project','empty.env'),keys:[],merge:false})).json();
+    assert.equal(empty.count,0);assert(!fs.readFileSync(path.join(dir,'project','empty.env'),'utf8').includes('private-test-value'));
+    assert.equal((await call('/inject',{padding:'x'.repeat(1024*1024)})).status,413);
+    const raceTarget=path.join(dir,'project','revoked.env');
+    const response=new Promise((resolve,reject)=>{
+        const request=require('node:http').request({hostname:'127.0.0.1',port:api.port,path:'/inject',method:'POST',headers:{authorization:`Bearer ${api.token}`,'x-vault-agent-token':agent.token,'content-type':'application/json'}},r=>{r.resume();resolve(r.statusCode);});
+        request.on('error',reject);request.write('{"project":"Allowed",');
+        setTimeout(()=>{registry.revoke(agent.id);request.end('"target_path":'+JSON.stringify(raceTarget)+'}');},30);
+    });
+    assert.equal(await response,403);assert(!fs.existsSync(raceTarget));
     assert.equal((await call("/projects")).status, 403);
     store.lock();
     assert.equal((await call("/projects")).status, 423);

@@ -68,6 +68,8 @@ try {
         exact: true
     }).click();
     assert(await page.getByText("Value: synthetic-demo-only").isVisible());
+    const keyBounds=await page.getByText('DEMO_API_KEY',{exact:true}).boundingBox();
+    assert(keyBounds && keyBounds.width>100 && keyBounds.height<40,'Credential name must remain readable beside its icon');
     mkdirSync("docs/images", {
         recursive: true
     });
