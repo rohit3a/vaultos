@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Sync: a pull no longer marks unpushed local records as already published. A local edit kept by `sync accept-conflicts` stayed on that device: the next push skipped it and `sync status` reported nothing outgoing. The push index now matches what the sync repository holds, and an index affected by the old behavior is repaired by the next pull.
+- Sync: conflicting versions with the same revision and timestamp now resolve by content hash, so every device keeps the same version instead of each keeping its own.
+
 ## 0.1.0-preview.1
 
 First standalone public macOS preview.
