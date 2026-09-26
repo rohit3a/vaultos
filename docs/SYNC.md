@@ -25,7 +25,7 @@ An approved change to `recipients.txt` triggers re-encryption on the next push, 
 
 `sync status` fetches and reports transport and record drift. `sync push` encrypts changed records, signs ciphertext digests, commits only known sync paths, pushes, and checks the remote ref. `sync pull` fetches before verification/merge. Status exits 2 unless fully in sync; failed deliveries also exit 2 for automation.
 
-If content differs, inspect `sync plan` (local checkout only; fetch separately first) or the desktop's status/conflict output. The preview conservatively treats differing content as a conflict. Back up both devices, review the proposed winner based on revision/timestamp, and use `sync accept-conflicts` only if you accept that choice. The app stores an encrypted local backup before merging. Conflicting project/key names refuse merging instead of silently overwriting.
+If content differs, inspect `sync plan` (local checkout only; fetch separately first) or the desktop's status/conflict output. The preview conservatively treats differing content as a conflict. Back up both devices, review the proposed winner (the higher revision, then the later timestamp; an exact tie goes to the same version on every device), and use `sync accept-conflicts` only if you accept that choice. A local version that wins is published by your next `sync push`. The app stores an encrypted local backup before merging. Conflicting project/key names refuse merging instead of silently overwriting.
 
 A signature, recipient, replay, or unreadable-record error is a stop condition. Restore trusted copies or investigate the cause; do not bypass validation. Repository hooks are disabled for application Git operations. Configure credentials using your normal Git tools outside VaultOS.
 

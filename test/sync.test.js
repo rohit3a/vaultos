@@ -112,6 +112,101 @@ test("sync refuses concurrent edits until explicitly accepted and preserves a ba
     assert(fs.readdirSync(path.join(a.dataDir, "backups")).length > 0);
 });
 
+test("a pull that keeps a local edit leaves it for the next push instead of stranding it", t => {
+    const {a: a, b: b, sa: sa, sb: sb} = make(t);
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "base"
+    });
+    sa.push();
+    sb.pull();
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "edited-on-a"
+    });
+    sa.push();
+    b.setSecret("Example", {
+        key: "KEY",
+        value: "edited-on-b"
+    });
+    b.setSecret("Example", {
+        key: "KEY",
+        value: "edited-on-b-again"
+    });
+    const plan = sb.pull({
+        acceptConflicts: true
+    });
+    assert.equal(plan.conflicts[0].resolution, "local");
+    assert.equal(b.revealSecret("Example", "KEY").value, "edited-on-b-again");
+    assert.equal(sb.status().outgoing, 1, "the kept local edit must count as not yet pushed");
+    assert.equal(sb.push().written, 1, "the kept local edit must be written by the next push");
+    sa.pull({
+        acceptConflicts: true
+    });
+    assert.equal(a.revealSecret("Example", "KEY").value, "edited-on-b-again");
+    assert.equal(a.contentFingerprint(), b.contentFingerprint());
+    assert.equal(sb.push().written, 0, "records that match the repository are not rewritten");
+});
+
+test("a push index that marks unpushed edits as published is repaired by the next pull", t => {
+    const {a: a, b: b, sa: sa, sb: sb} = make(t);
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "base"
+    });
+    sa.push();
+    sb.pull();
+    b.setSecret("Example", {
+        key: "KEY",
+        value: "stranded-edit"
+    });
+    const idx = sb.readIndex();
+    for (const [ref, e] of sb.localRecords()) idx.records[ref] = e.hash;
+    sb.writeIndex(idx);
+    assert.equal(sb.push().written, 0);
+    sb.pull({
+        acceptConflicts: true
+    });
+    assert.equal(sb.push().written, 1);
+    sa.pull({
+        acceptConflicts: true
+    });
+    assert.equal(a.revealSecret("Example", "KEY").value, "stranded-edit");
+});
+
+test("conflicts with equal revision and timestamp resolve to the same winner on both devices", t => {
+    const {a: a, b: b, sa: sa, sb: sb} = make(t);
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "base"
+    });
+    sa.push();
+    sb.pull();
+    const stamp = (new Date).toISOString();
+    for (const [store, value] of [ [ a, "tie-a" ], [ b, "tie-b" ] ]) {
+        store.setSecret("Example", {
+            key: "KEY",
+            value: value
+        });
+        store.findSecret(store.findProject("Example"), "KEY").updatedAt = stamp;
+        store.persist();
+    }
+    sa.push();
+    const planB = sb.pull({
+        acceptConflicts: true
+    });
+    sb.push();
+    sa.pull({
+        acceptConflicts: true
+    });
+    assert.equal(planB.conflicts.length, 1);
+    assert.equal(a.contentFingerprint(), b.contentFingerprint(), "both devices must keep the same version");
+    assert([ "tie-a", "tie-b" ].includes(a.revealSecret("Example", "KEY").value));
+});
+
 test("new approved recipients receive re-encrypted existing records", t => {
     const {a: a, sa: sa, sb: sb, repo: repo, dir: dir} = make(t);
     a.createProject("Example");
