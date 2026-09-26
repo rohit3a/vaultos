@@ -37,6 +37,18 @@ test("manual lock blocks remembered background unlock; dead write locks recover"
     assert.equal(store.listProjects()[0].name, "Recovered");
 });
 
+test("a process that did not write the session file cannot remove it", t => {
+    const dir = fixture(t), store = new Store(dir), {execFileSync: execFileSync} = require("node:child_process");
+    store.writeSession(4242, "a".repeat(64));
+    const other = `new (require(${JSON.stringify(require.resolve("../store"))}).Store)(${JSON.stringify(dir)}).clearSession()`;
+    execFileSync(process.execPath, [ "-e", other ], {
+        stdio: "pipe"
+    });
+    assert.equal(JSON.parse(fs.readFileSync(store.sessionPath, "utf8")).pid, process.pid);
+    store.clearSession();
+    assert(!fs.existsSync(store.sessionPath));
+});
+
 test("legacy encryption remains readable", () => {
     const crypto = require("node:crypto"), {decryptVault: decryptVault} = require("../crypto");
     const salt = Buffer.alloc(16, 1), iv = Buffer.alloc(12, 2), pw = "synthetic-legacy-password";

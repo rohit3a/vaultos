@@ -644,7 +644,9 @@ class Sync {
             }
             const lrev = lo.record.rev || 1, rrev = rp.record.rev || 1;
             const lts = Date.parse(lo.record.updatedAt || 0), rts = Date.parse(rp.record.updatedAt || 0);
-            const remoteWins = rrev > lrev || rrev === lrev && rts > lts;
+            // Equal revision and timestamp must break the same way on every device, or each
+            // keeps its own version and accepting conflicts never converges. Content hash decides.
+            const remoteWins = rrev > lrev || rrev === lrev && (rts > lts || rts === lts && rp.hash > lo.hash);
             plan.conflicts.push({
                 ref: ref,
                 key: lo.record.key,
@@ -720,8 +722,18 @@ class Sync {
             this.store.vault = rollback;
             throw e;
         }
+        // The index tells push() which records the repository already holds. Mark only
+        // records whose local copy matches the repository. A local edit kept by a conflict
+        // resolution, or a record that exists only here, must stay unmarked so that the next
+        // push writes it; marking every local record stranded those edits on this device.
         const idx = this.readIndex();
-        for (const [ref, e] of this.localRecords()) idx.records[ref] = e.hash;
+        const merged = this.localRecords();
+        for (const [ref, rp] of remote) {
+            const lo = merged.get(ref);
+            if (!lo) continue;
+            if (lo.hash === rp.hash) idx.records[ref] = lo.hash; else delete idx.records[ref];
+        }
+        for (const ref of merged.keys()) if (!remote.has(ref)) delete idx.records[ref];
         for (const ref of plan.deleted) delete idx.records[ref];
         this.writeIndex(idx);
         return plan;
