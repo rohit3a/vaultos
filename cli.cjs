@@ -10,8 +10,13 @@ const {atomicWrite: atomicWrite, privateDir: privateDir, regularFile: regularFil
 async function main() {
     const args = process.argv.slice(2).filter(x => x !== "--password-stdin");
     const [command, ...rest] = args;
+    const admin = require("./admin");
+    if (admin.COMMANDS.includes(command)) {
+        console.log(JSON.stringify(await admin.runAdmin(args), null, 2));
+        return;
+    }
     if (!command || command === "help") {
-        console.log(`VaultOS Preview — local recovery and optional encrypted sync\n  node cli.cjs projects\n  node cli.cjs keys <project>\n  node cli.cjs inject <project> <absolute-file> [dotenv|json|shell]\n  node cli.cjs backup <absolute-directory>\n  node cli.cjs sync init <machine-label>\n  node cli.cjs sync identity\n  node cli.cjs sync trust <peer-identity.json>\n  node cli.cjs sync status|push|pull|plan|accept-conflicts\n  node cli.cjs sync now   (asks the running app or service to sync; no password prompt)\nSet VAULTOS_DATA_DIR / VAULTOS_SYNC_REPO to use non-default preview directories.\nPassword input is hidden. --password-stdin is available for controlled automation.\nQuit the preview app before CLI mutations. This tool never prints secret values.`);
+        console.log(`VaultOS Preview — local recovery and optional encrypted sync\n  node cli.cjs projects\n  node cli.cjs keys <project>\n  node cli.cjs inject <project> <absolute-file> [dotenv|json|shell]\n  node cli.cjs backup <absolute-directory>\n  node cli.cjs sync init <machine-label>\n  node cli.cjs sync identity\n  node cli.cjs sync trust <peer-identity.json>\n  node cli.cjs sync status|push|pull|plan|accept-conflicts\n  node cli.cjs sync now   (asks the running app or service to sync; no password prompt)\nSet VAULTOS_DATA_DIR / VAULTOS_SYNC_REPO to use non-default preview directories.\nPassword input is hidden. --password-stdin is available for controlled automation.\nQuit the preview app before CLI mutations. This tool never prints secret values.\n\n${admin.HELP}`);
         return;
     }
     const store = new Store;

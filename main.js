@@ -265,7 +265,7 @@ const agents = () => new Agents(store);
 
 handle("agents", () => agents().list());
 
-handle("enrolAgent", (name, scopes, projects, roots) => agents().enrol(name, scopes, projects, roots));
+handle("enrolAgent", (name, scopes, projects, roots, wildcards) => agents().enrol(name, scopes, projects, roots, wildcards));
 
 handle("reissueAgent", id => agents().reissue(id));
 
@@ -273,7 +273,7 @@ handle("revokeAgent", id => agents().revoke(id));
 
 handle("setAgentScopes", (id, scopes) => agents().setScopes(id, scopes));
 
-handle("setAgentAccess", (id, projects, roots) => agents().setAccess(id, projects, roots));
+handle("setAgentAccess", (id, projects, roots, wildcards) => agents().setAccess(id, projects, roots, wildcards));
 
 handle("chooseFolder", async () => {
     const r = await dialog.showOpenDialog(win, {

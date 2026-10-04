@@ -207,6 +207,23 @@ async function renderProjects() {
             };
             acts.appendChild(b);
         }
+        const approveAll = el(`<button class="iconbtn" title="Allow every pending key to be written by inject">Approve all ${pending.length}</button>`);
+        let approveArmed = false;
+        approveAll.onclick = async () => {
+            if (!approveArmed) {
+                approveArmed = true;
+                approveAll.textContent = `Confirm approving ${pending.length}?`;
+                setTimeout(() => {
+                    approveArmed = false;
+                    approveAll.textContent = `Approve all ${pending.length}`;
+                }, 2500);
+                return;
+            }
+            approveAll.disabled = true;
+            for (const pd of pending) await window.vault.approveInject(pd.project, pd.key, true);
+            render();
+        };
+        acts.appendChild(approveAll);
         scroll.appendChild(banner);
     }
     const addToggle = el(`<button class="addtoggle"><span class="plus">+</span> New project</button>`);
@@ -914,7 +931,7 @@ async function renderAgents() {
     const allScopes = await window.vault.allScopes();
     if (revision !== renderVersion) return;
     for (const a of list) {
-        const card = el(`<div class="secret">\n      <div class="head"><span class="key">${esc(a.name)}</span><span class="pname">${a.revoked ? "revoked" : "active"}</span></div>\n      <div class="badges">${a.scopes.map(x => `<span class="badge perm">${esc(x)}</span>`).join("")}</div>\n      <div class="note">${esc(a.ref)} · enrolled ${esc((a.enrolledAt || "").slice(0, 10))}${a.lastSeenAt ? ` · last seen ${esc(a.lastSeenAt.slice(0, 16).replace("T", " "))}` : " · never used"}</div>\n      <div class="val" data-tok style="display:none"></div>\n      <div class="actions"></div></div>`);
+        const card = el(`<div class="secret">\n      <div class="head"><span class="key">${esc(a.name)}</span><span class="pname">${a.revoked ? "revoked" : "active"}</span></div>\n      <div class="badges">${a.scopes.map(x => `<span class="badge perm">${esc(x)}</span>`).join("")}${a.allProjects ? `<span class="badge" style="border-color:var(--orange);color:var(--orange)">all projects</span>` : ""}${a.anyRoot ? `<span class="badge" style="border-color:var(--orange);color:var(--orange)">any folder</span>` : ""}</div>\n      <div class="note">${esc(a.ref)} · enrolled ${esc((a.enrolledAt || "").slice(0, 10))}${a.lastSeenAt ? ` · last seen ${esc(a.lastSeenAt.slice(0, 16).replace("T", " "))}` : " · never used"}</div>\n      <div class="val" data-tok style="display:none"></div>\n      <div class="actions"></div></div>`);
         const actions = card.querySelector(".actions");
         const tok = card.querySelector("[data-tok]");
         const revealScope = el(`<button class="iconbtn">${a.scopes.includes("reveal") ? "Revoke reveal" : "Grant reveal"}</button>`);
@@ -928,7 +945,7 @@ async function renderAgents() {
         reissue.onclick = async () => {
             const r = await window.vault.reissueAgent(a.id);
             if (revision !== renderVersion) return;
-            tok.textContent = `New token (shown once):\n${r.token}\n\nPut it in the token file named in your MCP configuration on the machine running this agent, or set VAULT_AGENT_TOKEN.`;
+            tok.textContent = `New token (shown once):\n${r.token}\n\nPut it in the private (0600) token file named by VAULTOS_AGENT_TOKEN_FILE in your MCP configuration on the machine running this agent.`;
             tok.style.display = "block";
         };
         const revoke = el(`<button class="iconbtn danger">${a.revoked ? "Revoked" : "Revoke"}</button>`);
@@ -956,7 +973,7 @@ async function renderAgents() {
             const saveAccess = el('<button class="btn sm">Save access</button>');
             card.appendChild(saveAccess);
             saveAccess.onclick = async () => {
-                await window.vault.setAgentAccess(a.id, picker.projects(), picker.roots);
+                await window.vault.setAgentAccess(a.id, picker.projects(), picker.roots, picker.wildcards());
                 render();
             };
             if (revision !== renderVersion) return;
@@ -989,9 +1006,9 @@ async function renderAgents() {
     add.onclick = async () => {
         err.textContent = "";
         try {
-            const r = await window.vault.enrolAgent(nameIn.value.trim(), [ ...chosen ], access.projects(), access.roots);
+            const r = await window.vault.enrolAgent(nameIn.value.trim(), [ ...chosen ], access.projects(), access.roots, access.wildcards());
             if (revision !== renderVersion) return;
-            out.textContent = `${r.name} enrolled.\n\nToken (shown once):\n${r.token}\n\nPut it in the token file named in your MCP configuration on that machine, or set VAULT_AGENT_TOKEN.`;
+            out.textContent = `${r.name} enrolled.\n\nToken (shown once):\n${r.token}\n\nPut it in the private (0600) token file named by VAULTOS_AGENT_TOKEN_FILE in your MCP configuration on that machine.`;
             out.style.display = "block";
             nameIn.value = "";
             await refreshAgents();
@@ -1195,13 +1212,34 @@ boot();
 async function accessPicker(parent, current = {}) {
     const chosen = new Set(current.projects || []), roots = [ ...current.roots || [] ];
     const wrap = el('<div class="field"><span class="label">Approved projects</span></div>');
+    const wildcard = (label, warning, checked) => {
+        const row = el(`<label class="note" style="display:flex;gap:8px;padding:6px"><input type="checkbox" style="width:auto" />${esc(label)}</label>`);
+        const note = el(`<div class="note" style="margin:0 6px 8px;color:var(--orange);display:none">${esc(warning)}</div>`);
+        const box = row.querySelector("input");
+        box.checked = checked;
+        note.style.display = checked ? "block" : "none";
+        box.addEventListener("change", () => {
+            note.style.display = box.checked ? "block" : "none";
+        });
+        wrap.appendChild(row);
+        wrap.appendChild(note);
+        return box;
+    };
+    const allBox = wildcard("All projects, including future ones", "All access: this agent can use every project in the vault, including projects created later, within its scopes. Prefer choosing projects.", current.allProjects === true);
+    const projectBoxes = [];
     for (const project of await window.vault.projects()) {
         const row = el(`<label class="note" style="display:flex;gap:8px;padding:6px"><input type="checkbox" style="width:auto" />${esc(project.name)}</label>`);
         const box = row.querySelector("input");
         box.checked = chosen.has(project.id);
         box.onchange = () => box.checked ? chosen.add(project.id) : chosen.delete(project.id);
+        projectBoxes.push(box);
         wrap.appendChild(row);
     }
+    const syncProjects = () => projectBoxes.forEach(box => {
+        box.disabled = allBox.checked;
+    });
+    allBox.addEventListener("change", syncProjects);
+    syncProjects();
     const folderList = el('<div class="note"></div>');
     const draw = () => {
         folderList.replaceChildren();
@@ -1225,10 +1263,15 @@ async function accessPicker(parent, current = {}) {
     };
     wrap.appendChild(folderList);
     wrap.appendChild(add);
+    const anyBox = wildcard("Any folder", "All access: this agent can read .env files from and write secrets to any path your account can write, except the vault's own folder. Prefer approving project folders.", current.anyRoot === true);
     parent.appendChild(wrap);
     return {
         projects: () => [ ...chosen ],
-        roots: roots
+        roots: roots,
+        wildcards: () => ({
+            allProjects: allBox.checked,
+            anyRoot: anyBox.checked
+        })
     };
 }
 

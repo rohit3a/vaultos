@@ -21,7 +21,7 @@ vault or search its credential files. Defaults for this project:
 | Linux install | `~/.local/opt/vaultos-preview`, `org.vaultos.preview.desktop` |
 | Optional data override | `VAULTOS_DATA_DIR`, an absolute directory |
 | MCP entry point | `mcp/server.mjs` in a source checkout |
-| Agent credential | `VAULTOS_AGENT_TOKEN_FILE`, an absolute private file path |
+| Agent credential | `VAULTOS_AGENT_TOKEN_FILE`, an absolute private (0600) file path, or `VAULTOS_AGENT=NAME` for `<data dir>/agents/NAME.token` |
 
 Use a new absolute data directory for testing. Setting the bridge's data override
 does not change the desktop's directory: both processes need the same setting.
@@ -113,6 +113,10 @@ builds on the same opt-in; install it only when requested.
    Never put it in chat, shell command arguments/history, or client inline JSON.
    An agent can prepare paths and permissions without reading the token. Lost
    tokens are reissued through the desktop; the previous token stops working.
+   Headless alternative for the human: `node cli.cjs agents enroll NAME
+   --token-file /absolute/private/NAME.token --projects "Example App" --roots
+   /absolute/project` prompts for the master password and writes the token to
+   that file without printing it.
 3. Add a stdio MCP entry using the client's supported settings or add-server
    command. Preserve all existing entries and inspect only relevant configuration.
    This common JSON shape is an example, not a universal client format:

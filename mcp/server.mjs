@@ -11,47 +11,13 @@ import { createHash } from "node:crypto";
 
 import { fileURLToPath } from "node:url";
 
-import { join } from "node:path";
-
-import { homedir, platform } from "node:os";
-
-import { spawn } from "node:child_process";
-
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 
-const {defaultDataDir: dataDir} = require("../paths.js");
+const {VaultClient: VaultClient} = require("../agent-client.js");
 
-const {readSession: readSession, probeSession: probeSession} = require("../session.js");
-
-const {regularFile: regularFile} = require("../fs-safe.js");
-
-const SESSION_PATH = join(dataDir(), "session.json");
-
-const AGENT_TOKEN = process.env.VAULTOS_AGENT_TOKEN || readAgentToken();
-
-function readAgentToken() {
-    const file = process.env.VAULTOS_AGENT_TOKEN_FILE;
-    if (!file) return "";
-    try {
-        const stat = regularFile(file, {
-            maxBytes: 4096
-        });
-        if ((stat.mode & 63) !== 0) throw new Error("Token file must be private");
-        return readFileSync(file, "utf8").trim();
-    } catch {
-        return "";
-    }
-}
-
-const SETUP_MSG = "Open VaultOS Preview and unlock it. Background unlocking is available only when you explicitly enable background access in Settings.";
-
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-function session() {
-    return readSession(SESSION_PATH);
-}
+const client = new VaultClient;
 
 function ok(o) {
     return {
@@ -72,59 +38,17 @@ function err(message) {
     };
 }
 
-let launch;
-
-async function ensureUp() {
-    if (await probeSession(SESSION_PATH)) return true;
-    if (!launch) launch = (async () => {
-        const child = spawn(process.execPath, [ fileURLToPath(new URL("../backend.cjs", import.meta.url)) ], {
-            detached: true,
-            stdio: "ignore"
-        });
-        let failed = false;
-        child.on("error", () => {
-            failed = true;
-        });
-        child.unref();
-        for (let i = 0; i < 10 && !failed; i++) {
-            await sleep(300);
-            if (await probeSession(SESSION_PATH, 200)) return true;
-        }
-        return false;
-    })().finally(() => {
-        launch = null;
-    });
-    return launch;
-}
-
-async function call(method, path, body) {
-    if (!AGENT_TOKEN) throw new Error("Enroll this agent in VaultOS Preview and configure its private token file");
-    if (!await ensureUp()) throw new Error(SETUP_MSG);
-    const s = session();
-    if (!s) throw new Error(SETUP_MSG);
-    let response;
-    try {
-        response = await fetch(`http://127.0.0.1:${s.port}${path}`, {
-            method: method,
-            headers: {
-                authorization: `Bearer ${s.token}`,
-                "x-vault-agent-token": AGENT_TOKEN,
-                "content-type": "application/json"
-            },
-            body: body ? JSON.stringify(body) : undefined,
-            signal: AbortSignal.timeout(15e3),
-            redirect: "error"
-        });
-    } catch {
-        throw new Error("Connection interrupted. Check the operation result before retrying a write");
-    }
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Vault operation refused");
-    return result;
-}
+const call = (method, path, body) => client.request(method, path, body);
 
 const BRIDGE_VERSION = {
-    version: "0.1.0-preview.1"
+    version: "0.1.0-preview.1",
+    sha256: (() => {
+        try {
+            return createHash("sha256").update(readFileSync(fileURLToPath(import.meta.url))).digest("hex");
+        } catch {
+            return null;
+        }
+    })()
 };
 
 const server = new Server({
@@ -138,7 +62,7 @@ const server = new Server({
 
 const TOOLS = [ {
     name: "vault_status",
-    description: "Check backend availability and report vault format, backend deployment version, bridge version, and sync health (autosync state, last sync time, error, stalled peers). This does not authenticate the enrolled agent; use whoami to verify identity and grants.",
+    description: "Check backend availability (distinguishing locked from not running), and report vault format, backend deployment version, sync health (autosync state, last sync time, error, stalled peers), and the bridge version and file hash. This does not authenticate the enrolled agent; use whoami to verify identity and grants.",
     inputSchema: {
         type: "object",
         properties: {}
@@ -322,7 +246,7 @@ const TOOLS = [ {
     }
 }, {
     name: "import_env",
-    description: "Import KEY=VALUE pairs from an absolute .env path inside an approved folder into an existing approved project. Requires add scope and applicable edit scopes/record delegation for updates. Does not auto-create projects. The app reads values without returning them in the tool response. Inspect keys and refused for partial success; new records await human injection approval.",
+    description: "Import KEY=VALUE pairs from an absolute .env path inside an approved folder into an approved project. Requires add scope and applicable edit scopes/record delegation for updates. Set createProject:true to create the project when no project with that name exists (add scope; an existing unapproved project is still refused). The app reads values without returning them in the tool response. Inspect keys and refused for partial success; new records await human injection approval.",
     inputSchema: {
         type: "object",
         properties: {
@@ -333,6 +257,10 @@ const TOOLS = [ {
             env_path: {
                 type: "string",
                 description: "Absolute path to the .env file, e.g. /absolute/project/.env.local"
+            },
+            createProject: {
+                type: "boolean",
+                description: "Create the project if no project with this name exists (default false)."
             }
         },
         required: [ "project", "env_path" ]
@@ -348,41 +276,10 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
     try {
         switch (name) {
           case "vault_status":
-            {
-                if (!await probeSession(SESSION_PATH)) await ensureUp();
-                const s = session();
-                if (!s) return ok({
-                    unlocked: false,
-                    message: SETUP_MSG
-                });
-                const st = await fetch(`http://127.0.0.1:${s.port}/status`, {
-                    headers: {
-                        authorization: `Bearer ${s.token}`
-                    },
-                    signal: AbortSignal.timeout(2e3),
-                    redirect: "error"
-                }).then(r => r.json()).catch(() => null);
-                if (!st || st.locked) return ok({
-                    unlocked: false,
-                    message: SETUP_MSG
-                });
-                const sync = st.sync || {};
-                return ok({
-                    unlocked: true,
-                    formatVersion: st.formatVersion,
-                    deployment: st.deployment,
-                    sync: {
-                        autoSync: sync.enabled === true,
-                        state: sync.state || "NOT_RUNNING",
-                        halted: sync.halted === true,
-                        lastSyncAt: sync.lastSyncAt || null,
-                        error: sync.error || null,
-                        peerStalled: sync.peerStalled === true,
-                        peerProblems: sync.peerProblems || []
-                    },
-                    bridge: BRIDGE_VERSION
-                });
-            }
+            return ok({
+                ...await client.status(),
+                bridge: BRIDGE_VERSION
+            });
 
           case "list_projects":
             return ok(await call("GET", "/projects"));
@@ -442,7 +339,10 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
           case "import_env":
             return ok(await call("POST", "/import", {
                 project: a.project,
-                env_path: a.env_path
+                env_path: a.env_path,
+                ...a.createProject === true ? {
+                    createProject: true
+                } : {}
             }));
 
           default:

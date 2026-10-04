@@ -7,6 +7,12 @@
 - Optional soft lock policy (default remains hard): screen lock, sleep and idle lock only the window while agents keep working; the Lock button stays a full lock.
 
 - Linux (source-built preview): optional password remembering through the Secret Service (`secret-tool`) with no plaintext fallback, `npm run dist:linux` packaging, a per-user installer with run-time Chromium sandbox detection, and an opt-in systemd user unit for the headless backend.
+- Agents: optional, default-off all-access grants (`allProjects`, `anyRoot`), set only by a human in Settings → Agents or the admin CLI.
+- `vaultos-agent` shell client (`agent-cli.cjs`) for enrolled agents, with the bridge's grants and token discovery (`VAULTOS_AGENT_TOKEN`, a private `VAULTOS_AGENT_TOKEN_FILE`, or `VAULTOS_AGENT` with `<data dir>/agents/NAME.token`).
+- Admin CLI commands for agents, pending approvals, the approval relay and headless password rotation, all authorized by the master password.
+- Optional approval relay route (`POST /pending/decide`) authenticated by a separately configured secret; an **Approve all** button in the pending banner.
+- MCP bridge: distinct locked/not-running errors, deduplicated backend start through a service manager or `backend.cjs --service`, sync health and bridge hash in `vault_status`, and `import_env` `createProject`.
+
 - Sync: a pull no longer marks unpushed local records as already published. A local edit kept by `sync accept-conflicts` stayed on that device: the next push skipped it and `sync status` reported nothing outgoing. The push index now matches what the sync repository holds, and an index affected by the old behavior is repaired by the next pull.
 - Sync: conflicting versions with the same revision and timestamp now resolve by content hash, so every device keeps the same version instead of each keeping its own.
 
