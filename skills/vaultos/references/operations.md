@@ -88,6 +88,11 @@ by `scripts/install-service-macos.sh` (`backend.cjs --service`, which takes over
 whenever no window owns the vault). Do not enable either, or install the service,
 unless the user's task asks for it.
 
+On a Mac, the human may turn on optional Touch ID settings. With confirmations on,
+desktop actions such as enrolling an agent, re-issuing a token or approving keys ask
+for Touch ID or the master password; only the human can answer. Touch ID guards the
+window, not agent tokens or the API.
+
 ## Troubleshooting
 
 | Symptom | Action |
