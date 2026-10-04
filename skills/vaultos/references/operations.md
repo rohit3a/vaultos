@@ -137,7 +137,8 @@ do not put real passwords into chat, tool arguments, or shell pipelines.
 The CLI's `agents`, `pending`, `approver` and `rotate-password` commands are the
 human's headless equivalents of desktop grants and approvals (see the connection
 guide). They need the master password, which only the human types. Never run them
-to grant your own access or approve your own records.
+to grant your own access or approve your own records. `import-legacy` is a
+one-time human migration from the earlier vault-os fork; do not run it for them.
 
 The CLI uses human authority and is not a substitute for denied MCP operations.
 In particular, CLI `inject` replaces the destination (`merge: false`), unlike the

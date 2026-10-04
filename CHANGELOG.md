@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `node cli.cjs import-legacy --from DIR [--plan]`: an explicit, one-time import of a data directory from the earlier vault-os fork into a new, empty preview data directory. It validates every record first, never modifies the source or copies its plaintext password file, keeps agent token hashes with deny-by-default access (or `--grant-all-existing-agents`), holds previously denied keys for approval, and maps a matching shared agent token to `agents/NAME.token`.
+
 - Optional always-on backend: `backend.cjs --service` waits while the desktop owns the vault, takes over when it closes, retries Keychain unlock, restores a removed session file and reloads a vault replaced on disk. `scripts/install-service-macos.sh` installs it as a LaunchAgent on request. It requires background access and exits when that is off.
 - Optional autosync (off by default) in whichever process owns the vault, with `POST /sync` / `node cli.cjs sync now` for owner-requested rounds and sync health in `vault_status`. It halts on conflicts and verification errors instead of resolving them.
 - Optional soft lock policy (default remains hard): screen lock, sleep and idle lock only the window while agents keep working; the Lock button stays a full lock.
