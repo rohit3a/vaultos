@@ -77,7 +77,9 @@ already run the bridge; do not replace it just to omit dependencies.
 The bridge works while the desktop is open and unlocked. Optional background
 startup also requires `npm run build:native` in the bridge checkout and explicit
 desktop opt-in to remembered Keychain access. Do not enable it as part of routine
-setup; see the operating reference for its different lock behavior.
+setup; see the operating reference for its different lock behavior. The optional
+always-on service (`scripts/install-service-macos.sh`, with `--print` to review and
+`--uninstall` to remove) builds on the same opt-in; install it only when requested.
 
 ## Enroll and configure
 

@@ -7,7 +7,7 @@ bridge tool names; a client may prefix them with a server namespace.
 
 | Tool | Arguments / purpose | Required scope |
 | --- | --- | --- |
-| `vault_status` | `{}`; backend/bridge version and availability | Not an authentication check |
+| `vault_status` | `{}`; backend/bridge version, availability and sync health (`sync.state`, `lastSyncAt`, `error`, `peerStalled`) | Not an authentication check |
 | `whoami` | `{}`; current identity and grants | Enrolled identity |
 | `list_projects` | `{}`; approved projects | `read` |
 | `list_secrets` | `{project}`; names and metadata, no values | `read` |
@@ -68,6 +68,13 @@ Keychain access and built the bridge's native helper, the bridge can start a
 separate backend. That headless backend **does not monitor screen lock**. Keep
 background access off, or use Lock before closing, when that boundary is needed.
 Do not enable password remembering to work around an unavailable or locked vault.
+
+Two further opt-in settings weaken this boundary and are the human's decision:
+the **soft lock** policy (screen lock, sleep and idle lock only the window while
+agents keep working; Lock stays a full lock), and the always-on service installed
+by `scripts/install-service-macos.sh` (`backend.cjs --service`, which takes over
+whenever no window owns the vault). Do not enable either, or install the service,
+unless the user's task asks for it.
 
 ## Troubleshooting
 
@@ -131,6 +138,11 @@ peers, push data, or accept conflicts while installing or connecting MCP.
 pure read. `sync plan` previews the local checkout. A successful push means Git
 received data, not that another machine applied it. Resolve the guide's trust and
 conflict checks before describing devices as synchronized.
+
+Autosync is off by default; the human enables it in Settings. `node cli.cjs sync now`
+asks the running owner for one round without a password. If `vault_status` shows a
+halted state such as `CONFLICTS_PENDING`, report it; accepting conflicts is a human
+review step in the desktop, never something to automate.
 
 For requested uninstall, disable background access or Lock, quit the identified
 preview, and remove only its MCP entry and app. Preserve data and encrypted

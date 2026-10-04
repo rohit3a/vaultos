@@ -27,6 +27,16 @@ An approved change to `recipients.txt` triggers re-encryption on the next push, 
 
 If content differs, inspect `sync plan` (local checkout only; fetch separately first) or the desktop's status/conflict output. The preview conservatively treats differing content as a conflict. Back up both devices, review the proposed winner (the higher revision, then the later timestamp; an exact tie goes to the same version on every device), and use `sync accept-conflicts` only if you accept that choice. A local version that wins is published by your next `sync push`. The app stores an encrypted local backup before merging. Conflicting project/key names refuse merging instead of silently overwriting.
 
+## Automatic sync
+
+Autosync is off by default. After a device can push and pull manually, enable **Sync automatically** in desktop Settings (stored as `autoSync: { enabled, intervalSeconds }`, interval 30–86400 seconds, default 120). The process that currently owns the unlocked vault (the desktop, a one-shot backend, or the `--service` backend) then pulls and pushes on that interval and about 5 seconds after each local change. It is paused while the vault is locked. It uses the same checkout, environment and verification as manual sync.
+
+Autosync never accepts conflicts. If a pull would need acceptance, or verification fails, or Git history diverges, it stops and reports the state (`CONFLICTS_PENDING`, for example) until you act: review the plan and pull with acceptance in the desktop, or let the service hand over to the desktop and resolve there. Only network failures (`REMOTE_UNREACHABLE`, rejected or unverified pushes) are retried on the next round.
+
+`node cli.cjs sync now` asks the running owner to perform one round instead of stopping it; it needs no password and exits 2 unless the round delivered. It uses the owner's session token, so it works only for your account, and agents cannot request it. The MCP `vault_status` tool reports sync health: autosync state, last successful sync, the last error, and whether a peer's signed heartbeat is older than 48 hours or reports uncommitted files (`peerStalled`). The desktop's sync status includes the same `autoSync` object.
+
+## Stop conditions
+
 A signature, recipient, replay, or unreadable-record error is a stop condition. Restore trusted copies or investigate the cause; do not bypass validation. Repository hooks are disabled for application Git operations. Configure credentials using your normal Git tools outside VaultOS.
 
 ## Keys and deletion

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Optional always-on backend: `backend.cjs --service` waits while the desktop owns the vault, takes over when it closes, retries Keychain unlock, restores a removed session file and reloads a vault replaced on disk. `scripts/install-service-macos.sh` installs it as a LaunchAgent on request. It requires background access and exits when that is off.
+- Optional autosync (off by default) in whichever process owns the vault, with `POST /sync` / `node cli.cjs sync now` for owner-requested rounds and sync health in `vault_status`. It halts on conflicts and verification errors instead of resolving them.
+- Optional soft lock policy (default remains hard): screen lock, sleep and idle lock only the window while agents keep working; the Lock button stays a full lock.
+
 - Sync: a pull no longer marks unpushed local records as already published. A local edit kept by `sync accept-conflicts` stayed on that device: the next push skipped it and `sync status` reported nothing outgoing. The push index now matches what the sync repository holds, and an index affected by the old behavior is repaired by the next pull.
 - Sync: conflicting versions with the same revision and timestamp now resolve by content hash, so every device keeps the same version instead of each keeping its own.
 
