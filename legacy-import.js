@@ -33,7 +33,7 @@ const UNDOABLE = new Set([ "create_secret", "update_secret", "delete_secret", "c
 
 const SECRET_FIELDS = [ "key", "value", "password", "note", "username", "email", "url", "provider", "permission", "expiresAt" ];
 
-const AGENT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const {AGENT_NAME: AGENT_NAME} = require("./agent-client");
 
 const TOKEN = /^[\x21-\x7e]{16,512}$/;
 
@@ -44,16 +44,10 @@ const label = v => String(v ?? "").slice(0, 120);
 
 const ruleOf = e => String(e && e.message || e).replace(/\s+/g, " ");
 
-const pidAlive = pid => {
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch (e) {
-        return e.code === "EPERM";
-    }
-};
+const {pidAlive: pidAlive} = session;
 
-// The earlier fork's liveness rule: a session file whose port answers /status is live;
+// The earlier fork's session file has its own shape, so session.findOwner cannot read it.
+// Its liveness rule: a session file whose port answers /status is live;
 // while the named process exists, give a busy owner a few longer chances.
 async function legacyOwner(file) {
     let s;

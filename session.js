@@ -125,6 +125,7 @@ module.exports = {
     readSession: readSession,
     probeSession: probeSession,
     findOwner: findOwner,
+    pidAlive: pidAlive,
     lockOwner: lockOwner,
     requestShutdown: requestShutdown,
     claim: claim

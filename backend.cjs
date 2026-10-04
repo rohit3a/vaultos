@@ -80,9 +80,11 @@ async function main({service: service = process.argv.includes("--service"), stor
         } catch {}
     });
     const setStop = fn => stop = fn;
+    // Permanent conditions exit 0 in service mode so launchd (KeepAlive SuccessfulExit=false)
+    // and systemd (Restart=on-failure) do not relaunch the service in a loop.
     if (!store.exists()) {
         log("no vault yet. Open VaultOS Preview once to create one.");
-        return 2;
+        return service ? 0 : 2;
     }
     if (!service) {
         const live = await probeSession(store.sessionPath);
@@ -108,7 +110,7 @@ async function main({service: service = process.argv.includes("--service"), stor
     // desktop can always claim the vault first.
     if (!store.keyring.describe().secure) {
         log("service mode needs secure remembered-password storage (on macOS, build the Keychain helper with npm run build:native) and background access enabled in Settings.");
-        return 3;
+        return 0;
     }
     let said = null, noPasswordSince = null, unlockWait = pollMs;
     const wait = async (message, ms) => {
@@ -133,7 +135,7 @@ async function main({service: service = process.argv.includes("--service"), stor
             }
             if (status.reason === "no-vault") {
                 log("no vault yet. Open VaultOS Preview once to create one.");
-                return 2;
+                return 0;
             }
             if (status.reason === "no-password") {
                 noPasswordSince = noPasswordSince || Date.now();

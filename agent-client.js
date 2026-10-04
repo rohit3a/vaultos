@@ -129,7 +129,7 @@ function defaultStartBackend(dataDir, {useService: useService}) {
         exited: null
     };
     if (useService && startService()) return outcome;
-    const child = spawn(process.execPath, [ path.join(__dirname, "backend.cjs"), "--service" ], {
+    const child = spawn(process.execPath, [ path.join(__dirname, "backend.cjs") ], {
         detached: true,
         stdio: "ignore",
         env: {
@@ -288,6 +288,7 @@ class VaultClient {
 }
 
 module.exports = {
+    AGENT_NAME: AGENT_NAME,
     VaultClient: VaultClient,
     VaultError: VaultError,
     MESSAGES: MESSAGES,
