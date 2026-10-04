@@ -82,7 +82,9 @@ test("MCP stdio injects through real authenticated HTTP without returning values
     const output = path.join(dir, "project");
     fs.mkdirSync(output);
     const agent = new Agents(store).enrol("MCP test", [ "read", "inject" ], [ "Example" ], [ output ]);
-    const api = await startApi(store);
+    const api = await startApi(store, {
+        autoSync: new (require("../autosync").AutoSync)(store)
+    });
     store.writeSession(api.port, api.token);
     t.after(async () => {
         api.server.closeAllConnections();
@@ -106,6 +108,21 @@ test("MCP stdio injects through real authenticated HTTP without returning values
     t.after(() => client.close());
     await client.connect(transport);
     assert((await client.listTools()).tools.some(x => x.name === "inject_secrets"));
+    assert(!(await client.listTools()).tools.some(x => /sync/.test(x.name)));
+    const status = JSON.parse((await client.callTool({
+        name: "vault_status",
+        arguments: {}
+    })).content[0].text);
+    assert.equal(status.unlocked, true);
+    assert.deepEqual(status.sync, {
+        autoSync: false,
+        state: "STOPPED",
+        halted: false,
+        lastSyncAt: null,
+        error: null,
+        peerStalled: false,
+        peerProblems: []
+    });
     const result = await client.callTool({
         name: "inject_secrets",
         arguments: {

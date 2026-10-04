@@ -33,8 +33,45 @@ async function probeSession(file, timeoutMs = 1e3) {
     }
 }
 
+const pidAlive = pid => {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (e) {
+        return e.code === "EPERM";
+    }
+};
+
+// A live owner can miss one probe while a sync round holds its event loop. While the
+// process named in the session file still exists, give it a few longer chances.
+async function findOwner(file) {
+    const live = await probeSession(file);
+    if (live) return live;
+    const s = readSession(file);
+    if (!s || !Number.isInteger(s.pid) || s.pid <= 0 || s.pid === process.pid) return null;
+    for (let i = 0; i < 4 && pidAlive(s.pid); i++) {
+        const again = await probeSession(file, 2500);
+        if (again) return again;
+    }
+    return null;
+}
+
+// The pid holding owner.lock, if that process is alive. Does not claim anything.
+function lockOwner(dataDir, name = "owner.lock") {
+    const file = path.join(dataDir, name);
+    try {
+        regularFile(file, {
+            maxBytes: 128
+        });
+        const pid = Number(fs.readFileSync(file, "utf8"));
+        return Number.isInteger(pid) && pid > 0 && pidAlive(pid) ? pid : null;
+    } catch {
+        return null;
+    }
+}
+
 async function requestShutdown(file) {
-    const s = await probeSession(file);
+    const s = await findOwner(file);
     if (!s) return true;
     try {
         await fetch(`http://127.0.0.1:${s.port}/shutdown`, {
@@ -87,6 +124,9 @@ function claim(dataDir, name = "owner.lock") {
 module.exports = {
     readSession: readSession,
     probeSession: probeSession,
+    findOwner: findOwner,
+    pidAlive: pidAlive,
+    lockOwner: lockOwner,
     requestShutdown: requestShutdown,
     claim: claim
 };

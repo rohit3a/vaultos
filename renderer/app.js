@@ -27,12 +27,75 @@ const providerById = id => PROVIDERS.find(p => p.id === id) || PROVIDERS.find(p 
 
 let AGENTS = [];
 
+let TOUCH_ID = {
+    available: false,
+    enabled: false,
+    ready: false,
+    autoPrompt: false
+};
+
 const agentLabel = ref => {
     const a = AGENTS.find(x => x.ref === ref);
     return a ? a.name : (ref || "").replace(/^agent:/, "agent ");
 };
 
-const LOCK_GLYPH = `<svg class="glyph" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">\n  <rect x="10" y="24" width="36" height="26" rx="7" fill="#ea4711" opacity="0.14"/>\n  <rect x="10" y="24" width="36" height="26" rx="7" stroke="#ea4711" stroke-width="2.5"/>\n  <path d="M18 24v-6a10 10 0 0 1 20 0v6" stroke="#ea4711" stroke-width="2.5" stroke-linecap="round"/>\n  <circle cx="28" cy="35" r="3.5" fill="#ea4711"/>\n  <rect x="26.5" y="35" width="3" height="8" rx="1.5" fill="#ea4711"/>\n</svg>`;
+// ── Dial ───────────────────────────────────────────────────────────────────
+// The vault-door mascot from the marketing mini-game (hero-game/render.ts), as a
+// static inline SVG. It appears only on the unlock/create-vault screen and,
+// small, in the "no projects yet" empty state.
+const DIAL = {
+    rim: "#e2541c",
+    door: "#ff9658",
+    bolt: "#ffd2ad",
+    nose: "#fff2dc",
+    cheek: "rgba(255,111,143,0.55)"
+};
+
+function dialSvg(cls = "dial") {
+    const eye = side => `<ellipse cx="${side * 15}" cy="-15" rx="7.5" ry="9.5" fill="#fff" class="sp-o" stroke-width="2.4"/><circle cx="${side * 15}" cy="-13.5" r="4" class="sp-i"/><circle cx="${side * 15 + 1.4}" cy="-15.4" r="1.3" fill="#fff"/>`;
+    const ticks = Array.from({
+        length: 12
+    }, (_, i) => {
+        const a = i / 12 * Math.PI * 2, inner = i % 3 === 0 ? 7.5 : 9.5;
+        return `<line x1="${(Math.cos(a) * inner).toFixed(2)}" y1="${(Math.sin(a) * inner).toFixed(2)}" x2="${(Math.cos(a) * 11.2).toFixed(2)}" y2="${(Math.sin(a) * 11.2).toFixed(2)}" stroke="#6b5a7a" stroke-width="1.4" stroke-linecap="round"/>`;
+    }).join("");
+    const bolts = Array.from({
+        length: 10
+    }, (_, i) => {
+        const a = i / 10 * Math.PI * 2;
+        return `<circle cx="${(Math.cos(a) * 44).toFixed(1)}" cy="${(Math.sin(a) * 44).toFixed(1)}" r="2.7" fill="${DIAL.bolt}"/>`;
+    }).join("");
+    const legs = [ -1, 1 ].map(s => `<rect x="${s * 20 - 7}" y="42" width="14" height="18" rx="6" fill="${DIAL.rim}" class="sp-o" stroke-width="2.6"/><ellipse cx="${s * 23}" cy="60" rx="12" ry="6.5" fill="${DIAL.rim}" class="sp-o" stroke-width="2.6"/>`).join("");
+    const arms = [ -1, 1 ].map(s => `<g transform="translate(${s * 51} 12) rotate(${s * 28.6})"><ellipse cx="0" cy="6" rx="7.5" ry="13" fill="${DIAL.rim}" class="sp-o" stroke-width="2.6"/></g>`).join("");
+    const hinges = [ -17, 17 ].map(y => `<rect x="-46" y="${y - 5}" width="9" height="10" rx="3" fill="${DIAL.bolt}" class="sp-o" stroke-width="2"/>`).join("");
+    return `<svg class="${cls}" viewBox="-68 -58 136 142" aria-hidden="true" focusable="false">` + `<ellipse cx="0" cy="64" rx="51" ry="11" fill="rgba(80,35,30,0.16)"/>${legs}${arms}` + `<circle r="50" fill="${DIAL.rim}" class="sp-o" stroke-width="3.5"/>${bolts}<circle r="39" fill="${DIAL.door}" class="sp-o" stroke-width="3"/>${hinges}` + `${eye(-1)}${eye(1)}<ellipse cx="-26" cy="7" rx="6" ry="3.6" fill="${DIAL.cheek}"/><ellipse cx="26" cy="7" rx="6" ry="3.6" fill="${DIAL.cheek}"/>` + `<g transform="translate(0 5)"><circle r="13" fill="${DIAL.nose}" class="sp-o" stroke-width="2.6"/>${ticks}<line x1="0" y1="0" x2="0" y2="-8" stroke="${DIAL.rim}" stroke-width="3" stroke-linecap="round"/><circle r="3" fill="${DIAL.rim}"/></g>` + `<path class="sp-o" d="M5.66 25.1A7 7 0 0 1 -5.66 25.1" fill="none" stroke-width="2.6"/></svg>`;
+}
+
+// One coloured initial per project, the same colour for the same name.
+const TILE_COLORS = [ "#b9b0ff", "#7fdbe8", "#7fdcb8", "#ffc566", "#ff9db8" ];
+
+function tileColor(name) {
+    let h = 2166136261;
+    for (const ch of String(name == null ? "" : name)) {
+        h ^= ch.codePointAt(0);
+        h = Math.imul(h, 16777619);
+    }
+    return TILE_COLORS[(h >>> 0) % TILE_COLORS.length];
+}
+
+const initialOf = name => (String(name || "").trim().match(/[\p{L}\p{N}]/u) || [ "#" ])[0].toUpperCase();
+
+// A flat vault-door glyph for the header: ring, dial and one tick.
+const GLYPH = `<svg class="glyph" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4.5" fill="var(--orange)" stroke="currentColor" stroke-width="1.5"/><path d="M12 7.5V5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
+
+// A titled card. Returns its body.
+function panel(parent, title, {tag: tag = ""} = {}) {
+    const card = el(`<section class="card"><div class="card-head"><h3 class="card-title"></h3>${tag ? `<span class="pname"></span>` : ""}</div><div class="card-body"></div></section>`);
+    card.querySelector(".card-title").textContent = title;
+    if (tag) card.querySelector(".pname").textContent = tag;
+    parent.appendChild(card);
+    return card.querySelector(".card-body");
+}
 
 function detectProvider(keyName) {
     if (!keyName) return "custom";
@@ -49,8 +112,11 @@ async function boot() {
     PROVIDERS = await window.vault.providers();
     const s = await window.vault.state();
     document.documentElement.dataset.platform = s.isMac ? "mac" : "other";
+    TOUCH_ID = s.touchId || TOUCH_ID;
+    // Touch ID is offered automatically only when the window opens, never right after Lock.
     view = s.exists ? {
-        name: "unlock"
+        name: "unlock",
+        auto: TOUCH_ID.autoPrompt
     } : {
         name: "setup"
     };
@@ -72,8 +138,8 @@ function topbar({crumb: crumb} = {}) {
         c.onclick = crumb.onClick;
         bar.appendChild(c);
     }
-    bar.appendChild(el(`<div class="wordmark">VAULT<span class="dot">.</span>OS</div>`));
-    bar.appendChild(el(`<div class="status"><span class="led"></span>Unlocked</div>`));
+    bar.appendChild(el(`<div class="wordmark">${GLYPH}<span class="wm">VAULT<span class="dot">.</span>OS</span></div>`));
+    bar.appendChild(el(`<div class="status" title="Vault unlocked"><span class="led"></span><span class="st">Unlocked</span></div>`));
     const gear = el(`<button class="iconbtn gear" title="Settings"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>`);
     gear.onclick = () => {
         view = {
@@ -119,13 +185,13 @@ function renderLoading() {
 
 function renderSetup() {
     const wrap = el(`<div class="center"></div>`);
-    wrap.appendChild(el(LOCK_GLYPH));
+    wrap.appendChild(el(dialSvg("dial hero")));
     wrap.appendChild(el(`<h1>Set up your vault</h1>`));
-    wrap.appendChild(el(`<p>One master password encrypts everything. It stays in memory while unlocked. Optional Keychain access can be enabled later. Keep the password safe; there is no password reset.</p>`));
+    wrap.appendChild(el(`<p>One master password encrypts everything. It stays in memory while unlocked. Optional Keychain access can be enabled later. <strong>Keep the password safe; there is no password reset.</strong></p>`));
     const pw = el(`<input type="password" placeholder="Master password" />`);
     const pw2 = el(`<input type="password" placeholder="Confirm password" />`);
     const err = el(`<div class="err"></div>`);
-    const btn = el(`<button class="btn">Create vault</button>`);
+    const btn = el(`<button class="btn primary">Create vault</button>`);
     btn.onclick = async () => {
         if (pw.value.length < 12) return err.textContent = "Use at least 12 characters.";
         if (pw.value !== pw2.value) return err.textContent = "Passwords do not match.";
@@ -153,14 +219,19 @@ function renderSetup() {
     pw.focus();
 }
 
-function renderUnlock() {
+async function renderUnlock() {
+    const revision = renderVersion;
+    // Touch ID can come and go (lid closed, lockout, a manual Lock), so ask each time.
+    TOUCH_ID = (await window.vault.state()).touchId || TOUCH_ID;
+    if (revision !== renderVersion) return;
     const wrap = el(`<div class="center"></div>`);
-    wrap.appendChild(el(LOCK_GLYPH));
-    wrap.appendChild(el(`<h1>VAULT<span class="dot" style="color:var(--orange)">.</span>OS</h1>`));
+    wrap.appendChild(el(dialSvg("dial hero")));
+    wrap.appendChild(el(`<div class="kicker">Welcome back. Ready when you are.</div>`));
+    wrap.appendChild(el(`<h1>VAULT<span class="dot">.</span>OS</h1>`));
     wrap.appendChild(el(`<p>Unlock to let approved agents use your keys. Locks after 15 minutes of inactivity, when the Mac locks, or when you press Lock.</p>`));
     const pw = el(`<input type="password" placeholder="Master password" />`);
     const err = el(`<div class="err"></div>`);
-    const btn = el(`<button class="btn">Unlock</button>`);
+    const btn = el(`<button class="btn primary">Unlock</button>`);
     btn.onclick = async () => {
         const r = await window.vault.unlock(pw.value);
         if (!r.ok) {
@@ -178,8 +249,87 @@ function renderUnlock() {
         if (e.key === "Enter") btn.click();
     });
     [ pw, err, btn ].forEach(n => wrap.appendChild(n));
+    if (TOUCH_ID.ready) {
+        const touch = el(`<button class="btn ghost">Unlock with Touch ID</button>`);
+        touch.onclick = async () => {
+            touch.disabled = true;
+            err.textContent = "";
+            try {
+                const r = await window.vault.unlockTouchId();
+                if (r.ok) {
+                    view = {
+                        name: "projects"
+                    };
+                    render();
+                    return;
+                }
+                err.textContent = r.error;
+            } catch (e) {
+                err.textContent = cleanError(e);
+            }
+            touch.disabled = false;
+            pw.focus();
+        };
+        wrap.appendChild(touch);
+        if (view.auto) {
+            view.auto = false;
+            setTimeout(() => touch.click(), 0);
+        }
+    } else if (TOUCH_ID.available && TOUCH_ID.enabled) {
+        wrap.appendChild(el(`<p class="note">Touch ID returns after you enter the master password once.</p>`));
+    }
     $app.appendChild(wrap);
     pw.focus();
+}
+
+const cleanError = e => String(e?.message || e || "The operation failed. Please retry.").replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+
+// Human-only actions. With Touch ID confirmation on, the main process asks for Touch ID; when
+// it cannot (unavailable, cancelled, or not a Mac) it refuses with NEED_PASSWORD, and the
+// master password collected here confirms the action instead. The main process verifies it.
+async function human(name, ...args) {
+    try {
+        return await window.vault[name](...args);
+    } catch (e) {
+        const msg = cleanError(e);
+        if (!msg.startsWith("NEED_PASSWORD")) throw e;
+        if (!await askPassword(msg.replace(/^NEED_PASSWORD: /, ""))) throw new Error("Not confirmed, so nothing was done.");
+        return window.vault[name](...args);
+    }
+}
+
+function askPassword(why) {
+    return new Promise(resolve => {
+        const modal = el(`<div class="modal" role="dialog" aria-modal="true"><div class="box card"><div class="card-head"><h3 class="card-title">Confirm it's you</h3></div><div class="card-body"><div class="note"></div><input type="password" placeholder="Master password" /><div class="err"></div><div class="row2"><button class="btn ghost">Cancel</button><button class="btn primary">Confirm</button></div></div></div></div>`);
+        modal.querySelector(".note").textContent = why;
+        const input = modal.querySelector("input"), err = modal.querySelector(".err");
+        const [cancel, ok] = modal.querySelectorAll("button");
+        const done = result => {
+            input.value = "";
+            modal.remove();
+            resolve(result);
+        };
+        cancel.onclick = () => done(false);
+        ok.onclick = async () => {
+            ok.disabled = true;
+            try {
+                const r = await window.vault.confirmHuman(input.value);
+                if (r.ok) return done(true);
+                err.textContent = r.error;
+            } catch (e) {
+                err.textContent = cleanError(e);
+            }
+            ok.disabled = false;
+            input.value = "";
+            input.focus();
+        };
+        input.addEventListener("keydown", e => {
+            if (e.key === "Enter") ok.click();
+            if (e.key === "Escape") cancel.click();
+        });
+        document.body.appendChild(modal);
+        input.focus();
+    });
 }
 
 async function renderProjects() {
@@ -190,11 +340,11 @@ async function renderProjects() {
     if (revision !== renderVersion) return;
     await refreshAgents();
     if (revision !== renderVersion) return;
-    scroll.appendChild(el(`<div class="section"><span class="label">Projects<span class="dot" style="color:var(--orange)">.</span></span><span class="label">${projects.length}</span></div>`));
+    scroll.appendChild(el(`<div class="section"><span class="label">Projects<span class="dot">.</span></span><span class="label">${projects.length}</span></div>`));
     const pending = await window.vault.pending();
     if (revision !== renderVersion) return;
     if (pending.length) {
-        const banner = el(`<div class="secret" style="border-color:var(--orange)">\n      <div class="head"><span class="key">${pending.length} key${pending.length === 1 ? "" : "s"} awaiting your approval</span></div>\n      <div class="note">Added by an agent. Held back from .env until you approve.</div>\n      <div class="actions"></div></div>`);
+        const banner = el(`<div class="secret card attn">\n      <div class="head"><span class="key">${pending.length} key${pending.length === 1 ? "" : "s"} awaiting your approval</span></div>\n      <div class="note">Added by an agent. Held back from .env until you approve.</div>\n      <div class="actions"></div></div>`);
         const acts = banner.querySelector(".actions");
         for (const pd of pending.slice(0, 6)) {
             const b = el(`<button class="iconbtn">${esc(pd.project)}/${esc(pd.key)}</button>`);
@@ -207,12 +357,29 @@ async function renderProjects() {
             };
             acts.appendChild(b);
         }
+        const approveAll = el(`<button class="iconbtn" title="Allow every pending key to be written by inject">Approve all ${pending.length}</button>`);
+        let approveArmed = false;
+        approveAll.onclick = async () => {
+            if (!approveArmed) {
+                approveArmed = true;
+                approveAll.textContent = `Confirm approving ${pending.length}?`;
+                setTimeout(() => {
+                    approveArmed = false;
+                    approveAll.textContent = `Approve all ${pending.length}`;
+                }, 2500);
+                return;
+            }
+            approveAll.disabled = true;
+            for (const pd of pending) await human("approveInject", pd.project, pd.key, true);
+            render();
+        };
+        acts.appendChild(approveAll);
         scroll.appendChild(banner);
     }
     const addToggle = el(`<button class="addtoggle"><span class="plus">+</span> New project</button>`);
     const addForm = el(`<div class="addrow" style="display:none"></div>`);
     const nameInput = el(`<input type="text" placeholder="Project name" />`);
-    const addBtn = el(`<button class="btn sm">Add</button>`);
+    const addBtn = el(`<button class="btn sm primary">Add</button>`);
     const doAdd = async () => {
         const n = nameInput.value.trim();
         if (!n) {
@@ -245,11 +412,10 @@ async function renderProjects() {
     scroll.appendChild(addToggle);
     scroll.appendChild(addForm);
     if (!projects.length) {
-        scroll.appendChild(el(`<div class="empty"><div class="big">No projects yet</div>Create one, then stash its API keys.</div>`));
+        scroll.appendChild(el(`<div class="empty">${dialSvg("dial sm")}<div class="big">No projects yet</div><p>Create one, then add its API keys. To let an agent use them, enrol it under Settings, then Agents. Reveal is off by default.</p></div>`));
     }
     for (const p of projects) {
-        const logos = (p.providers.length ? p.providers : [ "custom" ]).slice(0, 5).map(id => providerById(id).svg).join("");
-        const row = el(`<div class="row">\n      <div class="logos">${logos}</div>\n      <div class="grow"><div class="name">${esc(p.name)}</div><div class="sub">${p.secretCount} ${p.secretCount === 1 ? "key" : "keys"}</div></div>\n      <div class="chev">›</div></div>`);
+        const row = el(`<div class="row">\n      <span class="tile" aria-hidden="true" style="background:${tileColor(p.name)}">${esc(initialOf(p.name))}</span>\n      <div class="grow"><div class="name">${esc(p.name)}</div><div class="sub">${p.secretCount} ${p.secretCount === 1 ? "key" : "keys"}</div></div>\n      <div class="chev">›</div></div>`);
         row.onclick = () => {
             view = {
                 name: "project",
@@ -282,8 +448,8 @@ async function renderProject() {
     const secrets = await window.vault.secrets(project);
     if (revision !== renderVersion) return;
     scroll.appendChild(el(`<div class="section"><span class="label">${esc(project)}</span><span class="label">${secrets.length} ${secrets.length === 1 ? "key" : "keys"}</span></div>`));
-    const actionRow = el(`<div style="display:flex;gap:8px;margin-bottom:14px"></div>`);
-    const add = el(`<button class="btn"><span style="font-size:15px">+</span> Add key</button>`);
+    const actionRow = el(`<div class="actionrow"></div>`);
+    const add = el(`<button class="btn primary"><span aria-hidden="true">+</span> Add key</button>`);
     add.onclick = () => {
         view = {
             name: "secret",
@@ -292,10 +458,10 @@ async function renderProject() {
         };
         render();
     };
-    const exp = el(`<button class="btn ghost sm" style="flex:0 0 auto" title="Export as password-protected PDF">Export</button>`);
+    const exp = el(`<button class="btn ghost" title="Export as password-protected PDF">Export</button>`);
     exp.onclick = async () => {
         exp.textContent = "Exporting…";
-        const r = await window.vault.exportProject(project);
+        const r = await human("exportProject", project);
         if (revision !== renderVersion) return;
         if (r.ok) {
             exp.textContent = "Exported ✓";
@@ -316,7 +482,7 @@ async function renderProject() {
     scroll.appendChild(actionRow);
     const expErr = el(`<div class="err" style="margin-top:-8px"></div>`);
     scroll.appendChild(expErr);
-    if (!secrets.length) scroll.appendChild(el(`<div class="empty"><div class="big">Empty</div>No keys stored here yet.</div>`));
+    if (!secrets.length) scroll.appendChild(el(`<div class="empty"><div class="big">No keys yet</div><p>No keys stored here yet.</p></div>`));
     for (const s of secrets) {
         const prov = providerById(s.provider);
         const sub = [ s.username && `@${esc(s.username)}`, s.email && esc(s.email), s.url && esc(s.url) ].filter(Boolean).join(" · ");
@@ -332,7 +498,7 @@ async function renderProject() {
             const txt = s.expiryStatus === "expired" ? "Expired" : s.daysLeft === 0 ? "Expires today" : `Expires in ${s.daysLeft}d`;
             badges.push(`<span class="badge ${cls}">${txt}</span>`);
         }
-        const card = el(`<div class="secret">\n      <div class="head">${prov.svg}<span class="key">${esc(s.key)}</span><span class="pname">${esc(prov.name)}</span></div>\n      ${badges.length ? `<div class="badges">${badges.join("")}</div>` : ""}\n      ${sub ? `<div class="note">${sub}</div>` : ""}\n      ${s.note ? `<div class="note">${esc(s.note)}</div>` : ""}\n      <div class="val" data-val style="display:none"></div>\n      <div class="actions"></div></div>`);
+        const card = el(`<div class="secret card">\n      <div class="head">${prov.svg}<span class="key mono">${esc(s.key)}</span><span class="pname">${esc(prov.name)}</span></div>\n      ${badges.length ? `<div class="badges">${badges.join("")}</div>` : ""}\n      ${sub ? `<div class="note">${sub}</div>` : ""}\n      ${s.note ? `<div class="note">${esc(s.note)}</div>` : ""}\n      <div class="val" data-val style="display:none"></div>\n      <div class="actions"></div></div>`);
         const valEl = card.querySelector("[data-val]");
         const actions = card.querySelector(".actions");
         const showBtn = el(`<button class="iconbtn">Reveal</button>`);
@@ -345,7 +511,7 @@ async function renderProject() {
                 shown = false;
                 return;
             }
-            const r = await window.vault.reveal(project, s.key);
+            const r = await human("reveal", project, s.key);
             if (revision !== renderVersion) return;
             const lines = [ (s.provider === "password" ? "Password: " : "Value: ") + (r.value || "(empty)") ];
             if (r.password) lines.push("Account pw: " + r.password);
@@ -356,7 +522,7 @@ async function renderProject() {
         };
         const copyBtn = el(`<button class="iconbtn">Copy</button>`);
         copyBtn.onclick = async () => {
-            await window.vault.copy(project, s.key);
+            await human("copy", project, s.key);
             if (revision !== renderVersion) return;
             copyBtn.textContent = "Copied";
             copyBtn.classList.add("copied");
@@ -394,7 +560,7 @@ async function renderProject() {
         if (s.injectApproved === false) {
             const okBtn = el(`<button class="iconbtn">Approve for .env</button>`);
             okBtn.onclick = async () => {
-                await window.vault.approveInject(project, s.key, true);
+                await human("approveInject", project, s.key, true);
                 render();
             };
             if (revision !== renderVersion) return;
@@ -403,7 +569,7 @@ async function renderProject() {
         if (s.owner && s.owner !== "human") {
             const adoptBtn = el(`<button class="iconbtn" title="Take ownership; the agent can no longer change it">Adopt</button>`);
             adoptBtn.onclick = async () => {
-                await window.vault.adopt(project, s.key);
+                await human("adopt", project, s.key);
                 render();
             };
             if (revision !== renderVersion) return;
@@ -423,7 +589,7 @@ async function renderProject() {
         [ showBtn, copyBtn, editBtn, ...ownActions, delBtn ].forEach(b => actions.appendChild(b));
         scroll.appendChild(card);
     }
-    const del = el(`<button class="btn danger" style="margin-top:18px">Delete project</button>`);
+    const del = el(`<button class="btn danger" style="margin-top:24px">Delete project</button>`);
     let armedP = false;
     del.onclick = async () => {
         if (!armedP) {
@@ -460,8 +626,8 @@ function renderProviderPicker(project) {
         }
     }));
     const scroll = el(`<div class="scroll"></div>`);
-    scroll.appendChild(el(`<div class="section"><span class="label">Add to ${esc(project)}<span class="dot" style="color:var(--orange)">.</span></span></div>`));
-    scroll.appendChild(el(`<div class="label" style="margin:0 2px 10px;color:var(--white-45)">Which service is this for?</div>`));
+    scroll.appendChild(el(`<div class="section"><span class="label">Add to ${esc(project)}<span class="dot">.</span></span></div>`));
+    scroll.appendChild(el(`<div class="note" style="margin:-4px 2px 12px">Which service is this for?</div>`));
     const grid = el(`<div class="picker-grid"></div>`);
     for (const p of PROVIDERS) {
         const card = el(`<div class="pcard ${p.type !== "keys" ? "special" : ""}"><div class="pcard-logo">${p.svg}</div><div class="pcard-name">${esc(p.name)}</div></div>`);
@@ -489,7 +655,7 @@ async function renderSecret() {
         const list = await window.vault.secrets(project);
         if (revision !== renderVersion) return;
         const meta = list.find(s => s.key === editing) || {};
-        const revealed = await window.vault.reveal(project, editing);
+        const revealed = await human("reveal", project, editing);
         if (revision !== renderVersion) return;
         current = {
             ...meta,
@@ -527,7 +693,7 @@ function fieldBlock(labelHtml) {
     return el(`<div class="field"><span class="label">${labelHtml}</span></div>`);
 }
 
-const OPTIONAL = ` <span style="text-transform:none;letter-spacing:0;color:var(--white-30)">(optional)</span>`;
+const OPTIONAL = ` <span class="optional">(optional)</span>`;
 
 async function persist(project, payload, editing) {
     const key = payload.key.trim();
@@ -622,7 +788,7 @@ function buildKeysForm(scroll, project, prov, editing, current) {
     const whichField = fieldBlock("Which key");
     const opts = el(`<div class="provider-grid"></div>`);
     whichField.appendChild(opts);
-    const keyField = fieldBlock('Key name <span style="text-transform:none;letter-spacing:0;color:var(--white-30)">(the env variable)</span>');
+    const keyField = fieldBlock('Key name <span class="optional">(the env variable)</span>');
     const keyInput = el(`<input type="text" placeholder="${esc(prov.fields[0] ? prov.fields[0].key : "API_KEY")}" value="${esc(current ? current.key : "")}" />`);
     keyField.appendChild(keyInput);
     function paintOpts() {
@@ -647,7 +813,7 @@ function buildKeysForm(scroll, project, prov, editing, current) {
     const meta = metaFields(prov, current);
     const acct = accountFields(current);
     const err = el(`<div class="err"></div>`);
-    const save = el(`<button class="btn">Save key</button>`);
+    const save = el(`<button class="btn primary">Save key</button>`);
     save.onclick = () => {
         if (!keyInput.value.trim()) {
             err.textContent = "Pick a key or type its name.";
@@ -686,7 +852,7 @@ function buildPasswordForm(scroll, project, prov, editing, current) {
     const noteInput = el(`<input type="text" placeholder="extra context" value="${esc(current ? current.note : "")}" />`);
     noteField.appendChild(noteInput);
     const err = el(`<div class="err"></div>`);
-    const save = el(`<button class="btn">Save password</button>`);
+    const save = el(`<button class="btn primary">Save password</button>`);
     save.onclick = () => {
         if (!labelInput.value.trim()) {
             err.textContent = "Give it a label.";
@@ -725,7 +891,7 @@ function buildCustomForm(scroll, project, prov, editing, current) {
     const meta = metaFields(prov, current);
     const acct = accountFields(current);
     const err = el(`<div class="err"></div>`);
-    const save = el(`<button class="btn">Save</button>`);
+    const save = el(`<button class="btn primary">Save</button>`);
     save.onclick = () => {
         if (!keyInput.value.trim()) {
             err.textContent = "Name is required.";
@@ -758,35 +924,93 @@ async function renderSettings() {
             }
         }
     }));
-    const scroll = el(`<div class="scroll"></div>`);
-    scroll.appendChild(el(`<div class="section"><span class="label">Settings<span class="dot" style="color:var(--orange)">.</span></span></div>`));
+    const page = el(`<div class="scroll"></div>`);
+    let scroll = page;
+    page.appendChild(el(`<div class="section"><span class="label">Settings<span class="dot">.</span></span></div>`));
     const s = await window.vault.getSettings();
     if (revision !== renderVersion) return;
+    scroll = panel(page, "Export password");
     const field = fieldBlock("Default export password");
     scroll.appendChild(field);
-    scroll.appendChild(el(`<div class="note" style="margin:-8px 2px 10px;color:var(--white-45)">Encrypts exported PDFs, which contain secret values. Use a separate strong password and share exports only with trusted recipients.</div>`));
     const input = el(`<input type="password" placeholder="${s.hasExportPassword ? "Replace export password" : "Set export password"}" />`);
     field.appendChild(input);
-    const rememberLabel = el(`<label class="note" style="display:flex;gap:10px;margin:16px 0"><input type="checkbox" style="width:auto" />Allow background access using macOS Keychain</label>`);
+    scroll.appendChild(el(`<div class="note">Encrypts exported PDFs, which contain secret values. Use a separate strong password and share exports only with trusted recipients.</div>`));
+    scroll = panel(page, "Background access");
+    const rememberLabel = el(`<label class="toggle"><input type="checkbox" class="switch" />Allow background access using macOS Keychain</label>`);
     const remember = rememberLabel.querySelector("input");
     remember.checked = s.rememberPassword;
     remember.disabled = !s.keyring.secure;
     scroll.appendChild(rememberLabel);
     scroll.appendChild(el(`<p class="note">Off by default. Enabling this lets the backend unlock without your password entry. Lock clears the saved password; unlock again to re-enable it. This does not isolate secrets from software running as you.</p>`));
+    scroll = panel(page, "Locking");
+    const softLabel = el(`<label class="toggle"><input type="checkbox" class="switch" />Soft lock: screen lock, sleep and idle lock only this window</label>`);
+    const soft = softLabel.querySelector("input");
+    soft.checked = s.lockPolicy === "soft";
+    scroll.appendChild(softLabel);
+    scroll.appendChild(el(`<p class="note">Off by default. With soft lock, the vault stays decrypted in memory and enrolled agents keep working while your Mac is locked, asleep or idle; anyone or anything that can act as your account in that time can use their grants. The Lock button always stops the API and clears the remembered password.</p>`));
+    scroll = panel(page, "Sync");
+    const autoLabel = el(`<label class="toggle"><input type="checkbox" class="switch" />Sync automatically while unlocked</label>`);
+    const auto = autoLabel.querySelector("input");
+    auto.checked = s.autoSync.enabled;
+    scroll.appendChild(autoLabel);
+    const intervalField = fieldBlock("Autosync interval (seconds)");
+    const interval = el(`<input type="number" min="30" max="86400" step="1" />`);
+    interval.value = String(s.autoSync.intervalSeconds);
+    intervalField.appendChild(interval);
+    scroll.appendChild(intervalField);
+    scroll.appendChild(el(`<p class="note">Off by default. Uses Git sync configured on this device: pulls and pushes on this interval and a few seconds after each change. It stops and waits for you on conflicts or verification errors, and never accepts conflicts itself.</p>`));
+    TOUCH_ID = (await window.vault.state()).touchId || TOUCH_ID;
+    if (revision !== renderVersion) return;
+    const t = s.touchId || {};
+    // Shown where Touch ID can prompt, and wherever an option is still on so it can be turned off.
+    const showTouchId = TOUCH_ID.available || t.unlock || t.humanActions || t.autoPrompt;
+    if (showTouchId) scroll = panel(page, "Touch ID", {
+        tag: TOUCH_ID.available ? "available" : "not available now"
+    });
+    const touchBox = (text, checked, needsRemember) => {
+        const label = el(`<label class="toggle"><input type="checkbox" class="switch" /><span></span></label>`);
+        label.querySelector("span").textContent = text;
+        const box = label.querySelector("input");
+        box.checked = checked;
+        box.disabled = !checked && (!TOUCH_ID.available || needsRemember && !s.rememberPassword);
+        if (showTouchId) scroll.appendChild(label);
+        return box;
+    };
+    if (showTouchId) {
+        scroll.appendChild(el(`<p class="note">Off by default. Needs background access above, because Touch ID unlock uses the password the Keychain remembers.</p>`));
+    }
+    const touchUnlock = touchBox("Unlock this window with Touch ID", t.unlock === true, true);
+    const touchAuto = touchBox("Ask for Touch ID when the window opens", t.autoPrompt === true, true);
+    const touchHuman = touchBox("Confirm reveal, copy, export, approvals, agent and security changes with Touch ID", t.humanActions === true, true);
+    if (showTouchId) scroll.appendChild(el(`<p class="note">After Lock, the master password is required once. Confirmations cover the next 30 seconds; when Touch ID cannot be shown or is cancelled, the master password is asked instead. Touch ID guards this window only: anything running as your account can still use agent tokens and an unlocked API.</p>`));
+    scroll = page;
     const err = el(`<div class="err"></div>`);
-    const save = el(`<button class="btn">Save settings</button>`);
+    const save = el(`<button class="btn primary">Save settings</button>`);
     save.onclick = async () => {
         try {
-            await window.vault.setSettings({
+            await human("setSettings", {
                 ...input.value ? {
                     exportPassword: input.value
                 } : {},
-                rememberPassword: remember.checked
+                rememberPassword: remember.checked,
+                lockPolicy: soft.checked ? "soft" : "hard",
+                autoSync: {
+                    enabled: auto.checked,
+                    intervalSeconds: Number(interval.value)
+                },
+                ...showTouchId ? {
+                    touchId: {
+                        unlock: touchUnlock.checked,
+                        autoPrompt: touchUnlock.checked && touchAuto.checked,
+                        humanActions: touchHuman.checked
+                    }
+                } : {}
             });
         } catch (e) {
-            err.textContent = e.message;
+            err.textContent = cleanError(e);
             return;
         }
+        err.textContent = "";
         save.textContent = "Saved ✓";
         save.classList.add("copied");
         setTimeout(() => {
@@ -794,9 +1018,11 @@ async function renderSettings() {
             save.classList.remove("copied");
         }, 1500);
     };
-    scroll.appendChild(err);
-    scroll.appendChild(save);
-    scroll.appendChild(el(`<div class="section" style="margin-top:26px"><span class="label">Master password</span></div>`));
+    const saveRow = el(`<div class="saverow"></div>`);
+    saveRow.appendChild(err);
+    saveRow.appendChild(save);
+    page.appendChild(saveRow);
+    scroll = panel(page, "Master password");
     const k = s.keyring || {};
     const STORE_NAMES = {
         "macos-keychain": "macOS Keychain",
@@ -823,7 +1049,7 @@ async function renderSettings() {
         }
         pwBtn.textContent = "Rotating…";
         try {
-            const r = await window.vault.changePassword(pwOld.value, pwNew.value);
+            const r = await human("changePassword", pwOld.value, pwNew.value);
             if (revision !== renderVersion) return;
             const done = r.backups.filter(b => b.status === "re-encrypted").length;
             const skipped = r.backups.filter(b => b.status !== "re-encrypted");
@@ -843,9 +1069,9 @@ async function renderSettings() {
     scroll.appendChild(pwErr);
     scroll.appendChild(pwBtn);
     scroll.appendChild(pwOut);
-    scroll.appendChild(el(`<div class="section" style="margin-top:26px"><span class="label">Access</span></div>`));
-    const nav = el(`<div style="display:flex;gap:8px"></div>`);
-    const agentsBtn = el(`<button class="btn">Agents</button>`);
+    scroll = panel(page, "Agents, sync and history");
+    const nav = el(`<div class="navrow"></div>`);
+    const agentsBtn = el(`<button class="btn ghost">Agents</button>`);
     agentsBtn.onclick = () => {
         view = {
             name: "agents"
@@ -870,7 +1096,7 @@ async function renderSettings() {
     nav.appendChild(syncBtn);
     nav.appendChild(historyBtn);
     scroll.appendChild(nav);
-    $app.appendChild(scroll);
+    $app.appendChild(page);
 }
 
 async function renderAgents() {
@@ -887,28 +1113,28 @@ async function renderAgents() {
         }
     }));
     const scroll = el(`<div class="scroll"></div>`);
-    scroll.appendChild(el(`<div class="section"><span class="label">Agents<span class="dot" style="color:var(--orange)">.</span></span></div>`));
-    scroll.appendChild(el(`<div class="note" style="margin:0 2px 12px;color:var(--white-45)">Any AI tool can be enrolled: Claude Code, Codex, Cursor, a script. Each gets its own token and its own scopes. Approve specific projects and folders. Agents can add keys only with the add scope; editing your keys also requires delegation and its matching scope.</div>`));
+    scroll.appendChild(el(`<div class="section"><span class="label">Agents<span class="dot">.</span></span></div>`));
+    scroll.appendChild(el(`<div class="note" style="margin:0 2px 14px">Any AI tool can be enrolled: Claude Code, Codex, Cursor, a script. Each gets its own token and its own scopes. Approve specific projects and folders. Agents can add keys only with the add scope; editing your keys also requires delegation and its matching scope.</div>`));
     const list = await window.vault.agents();
     if (revision !== renderVersion) return;
     const allScopes = await window.vault.allScopes();
     if (revision !== renderVersion) return;
     for (const a of list) {
-        const card = el(`<div class="secret">\n      <div class="head"><span class="key">${esc(a.name)}</span><span class="pname">${a.revoked ? "revoked" : "active"}</span></div>\n      <div class="badges">${a.scopes.map(x => `<span class="badge perm">${esc(x)}</span>`).join("")}</div>\n      <div class="note">${esc(a.ref)} · enrolled ${esc((a.enrolledAt || "").slice(0, 10))}${a.lastSeenAt ? ` · last seen ${esc(a.lastSeenAt.slice(0, 16).replace("T", " "))}` : " · never used"}</div>\n      <div class="val" data-tok style="display:none"></div>\n      <div class="actions"></div></div>`);
+        const card = el(`<div class="secret card">\n      <div class="head"><span class="key">${esc(a.name)}</span><span class="pname">${a.revoked ? "revoked" : "active"}</span></div>\n      <div class="badges">${a.scopes.map(x => `<span class="badge ${x === "reveal" ? "exp-amber" : "perm"}">${esc(x)}</span>`).join("")}${a.allProjects ? `<span class="badge allaccess">all projects</span>` : ""}${a.anyRoot ? `<span class="badge allaccess">any folder</span>` : ""}</div>\n      <div class="note"><span class="mono">${esc(a.ref)}</span> · enrolled ${esc((a.enrolledAt || "").slice(0, 10))}${a.lastSeenAt ? ` · last seen ${esc(a.lastSeenAt.slice(0, 16).replace("T", " "))}` : " · never used"}</div>\n      <div class="val" data-tok style="display:none"></div>\n      <div class="actions"></div></div>`);
         const actions = card.querySelector(".actions");
         const tok = card.querySelector("[data-tok]");
         const revealScope = el(`<button class="iconbtn">${a.scopes.includes("reveal") ? "Revoke reveal" : "Grant reveal"}</button>`);
         revealScope.onclick = async () => {
             const next = a.scopes.includes("reveal") ? a.scopes.filter(x => x !== "reveal") : [ ...a.scopes, "reveal" ];
-            await window.vault.setAgentScopes(a.id, next);
+            await human("setAgentScopes", a.id, next);
             render();
             if (revision !== renderVersion) return;
         };
         const reissue = el(`<button class="iconbtn" title="New token, same identity and same keys">Re-issue token</button>`);
         reissue.onclick = async () => {
-            const r = await window.vault.reissueAgent(a.id);
+            const r = await human("reissueAgent", a.id);
             if (revision !== renderVersion) return;
-            tok.textContent = `New token (shown once):\n${r.token}\n\nPut it in the token file named in your MCP configuration on the machine running this agent, or set VAULT_AGENT_TOKEN.`;
+            tok.textContent = `New token (shown once):\n${r.token}\n\nPut it in the private (0600) token file named by VAULTOS_AGENT_TOKEN_FILE in your MCP configuration on the machine running this agent.`;
             tok.style.display = "block";
         };
         const revoke = el(`<button class="iconbtn danger">${a.revoked ? "Revoked" : "Revoke"}</button>`);
@@ -924,7 +1150,7 @@ async function renderAgents() {
                 }, 2500);
                 return;
             }
-            await window.vault.revokeAgent(a.id);
+            await human("revokeAgent", a.id);
             render();
             if (revision !== renderVersion) return;
         };
@@ -933,10 +1159,10 @@ async function renderAgents() {
             accessBtn.disabled = true;
             const picker = await accessPicker(card, a);
             if (revision !== renderVersion) return;
-            const saveAccess = el('<button class="btn sm">Save access</button>');
+            const saveAccess = el('<button class="btn ghost sm">Save access</button>');
             card.appendChild(saveAccess);
             saveAccess.onclick = async () => {
-                await window.vault.setAgentAccess(a.id, picker.projects(), picker.roots);
+                await human("setAgentAccess", a.id, picker.projects(), picker.roots, picker.wildcards());
                 render();
             };
             if (revision !== renderVersion) return;
@@ -944,11 +1170,12 @@ async function renderAgents() {
         [ accessBtn, revealScope, reissue, revoke ].forEach(b => actions.appendChild(b));
         scroll.appendChild(card);
     }
-    if (!list.length) scroll.appendChild(el(`<div class="empty"><div class="big">No agents</div>Nothing can write to this vault yet.</div>`));
+    if (!list.length) scroll.appendChild(el(`<div class="empty"><div class="big">No agents</div><p>Nothing can write to this vault yet.</p></div>`));
+    const enrol = panel(scroll, "Enrol a new agent");
     const field = fieldBlock("Enrol a new agent");
     const nameIn = el(`<input type="text" placeholder="claude-code, codex, cursor…" />`);
     field.appendChild(nameIn);
-    scroll.appendChild(field);
+    enrol.appendChild(field);
     const scopeWrap = el(`<div class="badges" style="margin:0 2px 12px"></div>`);
     const chosen = new Set([ "read", "inject" ]);
     for (const sc of allScopes) {
@@ -959,19 +1186,19 @@ async function renderAgents() {
         };
         scopeWrap.appendChild(b);
     }
-    scroll.appendChild(scopeWrap);
-    scroll.appendChild(el(`<div class="note" style="margin:-6px 2px 10px;color:var(--white-45)">reveal is off by default. An agent without it can still write a working .env with inject, it just never sees a value.</div>`));
-    const access = await accessPicker(scroll);
+    enrol.appendChild(scopeWrap);
+    enrol.appendChild(el(`<div class="note" style="margin:-4px 2px 12px">reveal is off by default. An agent without it can still write a working .env with inject, it just never sees a value.</div>`));
+    const access = await accessPicker(enrol);
     if (revision !== renderVersion) return;
     const out = el(`<div class="val" style="display:none"></div>`);
     const err = el(`<div class="err"></div>`);
-    const add = el(`<button class="btn">Enrol agent</button>`);
+    const add = el(`<button class="btn primary">Enrol agent</button>`);
     add.onclick = async () => {
         err.textContent = "";
         try {
-            const r = await window.vault.enrolAgent(nameIn.value.trim(), [ ...chosen ], access.projects(), access.roots);
+            const r = await human("enrolAgent", nameIn.value.trim(), [ ...chosen ], access.projects(), access.roots, access.wildcards());
             if (revision !== renderVersion) return;
-            out.textContent = `${r.name} enrolled.\n\nToken (shown once):\n${r.token}\n\nPut it in the token file named in your MCP configuration on that machine, or set VAULT_AGENT_TOKEN.`;
+            out.textContent = `${r.name} enrolled.\n\nToken (shown once):\n${r.token}\n\nPut it in the private (0600) token file named by VAULTOS_AGENT_TOKEN_FILE in your MCP configuration on that machine.`;
             out.style.display = "block";
             nameIn.value = "";
             await refreshAgents();
@@ -980,9 +1207,9 @@ async function renderAgents() {
             err.textContent = e.message;
         }
     };
-    scroll.appendChild(err);
-    scroll.appendChild(add);
-    scroll.appendChild(out);
+    enrol.appendChild(err);
+    enrol.appendChild(add);
+    enrol.appendChild(out);
     $app.appendChild(scroll);
 }
 
@@ -1002,8 +1229,8 @@ async function renderDelegate() {
         }
     }));
     const scroll = el(`<div class="scroll"></div>`);
-    scroll.appendChild(el(`<div class="section"><span class="label">${esc(secret)}<span class="dot" style="color:var(--orange)">.</span></span></div>`));
-    scroll.appendChild(el(`<div class="note" style="margin:0 2px 14px;color:var(--white-45)">Delegating lets an agent rotate or update this key. It stays yours and stays here; you can take it back at any time.</div>`));
+    scroll.appendChild(el(`<div class="section"><span class="label">${esc(secret)}<span class="dot">.</span></span></div>`));
+    scroll.appendChild(el(`<div class="note" style="margin:0 2px 14px">Delegating lets an agent rotate or update this key. It stays yours and stays here; you can take it back at any time.</div>`));
     const all = await window.vault.secrets(project);
     if (revision !== renderVersion) return;
     const s = all.find(x => x.key === secret) || {
@@ -1013,17 +1240,17 @@ async function renderDelegate() {
     if (revision !== renderVersion) return;
     for (const a of agents.filter(x => !x.revoked)) {
         const on = (s.editableBy || []).includes(a.ref);
-        const row = el(`<div class="secret"><div class="head"><span class="key">${esc(a.name)}</span><span class="pname">${on ? "may edit this key" : "read only"}</span></div><div class="actions"></div></div>`);
+        const row = el(`<div class="secret card"><div class="head"><span class="key">${esc(a.name)}</span><span class="pname">${on ? "may edit this key" : "read only"}</span></div><div class="actions"></div></div>`);
         const btn = el(`<button class="iconbtn ${on ? "danger" : ""}">${on ? "Remove" : "Delegate"}</button>`);
         btn.onclick = async () => {
-            await window.vault.delegate(project, secret, a.ref, !on);
+            await human("delegate", project, secret, a.ref, !on);
             render();
         };
         if (revision !== renderVersion) return;
         row.querySelector(".actions").appendChild(btn);
         scroll.appendChild(row);
     }
-    if (!agents.length) scroll.appendChild(el(`<div class="empty"><div class="big">No agents</div>Enrol one in Settings first.</div>`));
+    if (!agents.length) scroll.appendChild(el(`<div class="empty"><div class="big">No agents</div><p>Enrol one in Settings first.</p></div>`));
     $app.appendChild(scroll);
 }
 
@@ -1127,16 +1354,35 @@ async function renderSync() {
     identity.onclick = () => run(() => window.vault.syncIdentity());
     const peer = el('<textarea placeholder="Paste verified peer identity JSON" rows="6"></textarea>');
     const trust = el('<button class="btn ghost">Trust verified peer</button>');
-    trust.onclick = () => run(() => window.vault.syncTrust(JSON.parse(peer.value)));
+    trust.onclick = () => run(() => human("syncTrust", JSON.parse(peer.value)));
     const status = el('<button class="btn ghost">Check remote status and conflicts</button>');
     status.onclick = () => run(() => window.vault.syncStatus());
     const push = el('<button class="btn">Push to Git remote</button>');
     push.onclick = () => run(() => window.vault.syncPush());
     const pull = el('<button class="btn">Pull from Git remote</button>');
     pull.onclick = () => run(() => window.vault.syncPull(false));
-    const accept = el('<button class="btn ghost">Pull and accept listed conflict winners</button>');
+    const accept = el('<button class="btn danger outlined">Pull and accept listed conflict winners</button>');
     accept.onclick = () => run(() => window.vault.syncPull(true));
-    for (const n of [ label, init, identity, peer, trust, status, push, pull, accept, el('<p class="note">A remote receipt confirms Git accepted a commit. Other devices must still pull it. Review conflicts before accepting; an encrypted local backup is created before a merge.</p>'), output ]) scroll.appendChild(n);
+    const group = title => {
+        const body = panel(scroll, title);
+        body.classList.add("stack");
+        return body;
+    };
+    const thisMachine = group("This machine");
+    const machineRow = el('<div class="btnrow"></div>');
+    machineRow.appendChild(init);
+    machineRow.appendChild(identity);
+    thisMachine.appendChild(label);
+    thisMachine.appendChild(machineRow);
+    const peers = group("Peers");
+    for (const n of [ peer, trust ]) peers.appendChild(n);
+    const records = group("Move records");
+    const moveRow = el('<div class="btnrow halves"></div>');
+    moveRow.appendChild(push);
+    moveRow.appendChild(pull);
+    const acceptWarn = el('<div class="warn-note risk">Accepting keeps the listed winning versions and overwrites the other copies. An encrypted local backup is made first.</div>');
+    for (const n of [ status, moveRow, el('<p class="note">A remote receipt confirms Git accepted a commit. Other devices must still pull it. Review conflicts before accepting; an encrypted local backup is created before a merge.</p>'), acceptWarn, accept ]) records.appendChild(n);
+    scroll.appendChild(output);
 }
 
 async function renderHistory() {
@@ -1155,8 +1401,9 @@ async function renderHistory() {
     const entries = await window.vault.history(100);
     if (revision !== renderVersion) return;
     const scroll = el('<div class="scroll"><h2>Recent changes</h2><p class="note">Undo refuses to overwrite a newer edit. Secret values are omitted from this view.</p></div>');
+    if (!entries.length) scroll.appendChild(el(`<div class="empty"><div class="big">No changes yet</div><p>Edits to projects and keys will show up here.</p></div>`));
     for (const entry of entries) {
-        const row = el(`<div class="secret"><div class="key">${esc(entry.action)} ${esc(entry.key || "")}</div><p class="note">${esc(entry.ts)} · ${esc(agentLabel(entry.actor))}</p></div>`);
+        const row = el(`<div class="secret card"><div class="key">${esc(entry.action)} ${esc(entry.key || "")}</div><p class="note">${esc(entry.ts)} · ${esc(agentLabel(entry.actor))}</p></div>`);
         if (!entry.reverted && [ "create_secret", "update_secret", "delete_secret", "create_project", "delete_project" ].includes(entry.action)) {
             const undo = el('<button class="btn ghost sm">Undo</button>');
             undo.onclick = async () => {
@@ -1175,18 +1422,39 @@ boot();
 async function accessPicker(parent, current = {}) {
     const chosen = new Set(current.projects || []), roots = [ ...current.roots || [] ];
     const wrap = el('<div class="field"><span class="label">Approved projects</span></div>');
+    const wildcard = (label, warning, checked) => {
+        const row = el(`<label class="toggle tight"><input type="checkbox" class="chk" />${esc(label)}</label>`);
+        const note = el(`<div class="warn-note" style="display:none">${esc(warning)}</div>`);
+        const box = row.querySelector("input");
+        box.checked = checked;
+        note.style.display = checked ? "block" : "none";
+        box.addEventListener("change", () => {
+            note.style.display = box.checked ? "block" : "none";
+        });
+        wrap.appendChild(row);
+        wrap.appendChild(note);
+        return box;
+    };
+    const allBox = wildcard("All projects, including future ones", "All access: this agent can use every project in the vault, including projects created later, within its scopes. Prefer choosing projects.", current.allProjects === true);
+    const projectBoxes = [];
     for (const project of await window.vault.projects()) {
-        const row = el(`<label class="note" style="display:flex;gap:8px;padding:6px"><input type="checkbox" style="width:auto" />${esc(project.name)}</label>`);
+        const row = el(`<label class="toggle tight"><input type="checkbox" class="chk" />${esc(project.name)}</label>`);
         const box = row.querySelector("input");
         box.checked = chosen.has(project.id);
         box.onchange = () => box.checked ? chosen.add(project.id) : chosen.delete(project.id);
+        projectBoxes.push(box);
         wrap.appendChild(row);
     }
+    const syncProjects = () => projectBoxes.forEach(box => {
+        box.disabled = allBox.checked;
+    });
+    allBox.addEventListener("change", syncProjects);
+    syncProjects();
     const folderList = el('<div class="note"></div>');
     const draw = () => {
         folderList.replaceChildren();
         for (const folder of [ ...roots ]) {
-            const row = el(`<div>${esc(folder)} <button class="iconbtn">Remove</button></div>`);
+            const row = el(`<div class="folder-row"><span>${esc(folder)}</span> <button class="iconbtn">Remove</button></div>`);
             row.querySelector("button").onclick = () => {
                 roots.splice(roots.indexOf(folder), 1);
                 draw();
@@ -1205,12 +1473,23 @@ async function accessPicker(parent, current = {}) {
     };
     wrap.appendChild(folderList);
     wrap.appendChild(add);
+    const anyBox = wildcard("Any folder", "All access: this agent can read .env files from and write secrets to any path your account can write, except the vault's own folder. Prefer approving project folders.", current.anyRoot === true);
     parent.appendChild(wrap);
     return {
         projects: () => [ ...chosen ],
-        roots: roots
+        roots: roots,
+        wildcards: () => ({
+            allProjects: allBox.checked,
+            anyRoot: anyBox.checked
+        })
     };
 }
+
+window.addEventListener("focus", async () => {
+    if (view.name !== "unlock") return;
+    const t = (await window.vault.state()).touchId;
+    if (t && view.name === "unlock" && (t.ready !== TOUCH_ID.ready || t.enabled !== TOUCH_ID.enabled)) render();
+});
 
 window.vault.onLocked(() => {
     AGENTS = [];
@@ -1239,7 +1518,7 @@ window.addEventListener("unhandledrejection", event => {
 });
 
 new MutationObserver(() => {
-    for (const input of document.querySelectorAll("input:not([aria-label]),textarea:not([aria-label]),select:not([aria-label])")) input.setAttribute("aria-label", input.closest(".field")?.querySelector(".label")?.textContent || input.placeholder || input.type);
+    for (const input of document.querySelectorAll("input:not([aria-label]),textarea:not([aria-label]),select:not([aria-label])")) if (!input.closest("label")) input.setAttribute("aria-label", input.closest(".field")?.querySelector(".label")?.textContent || input.placeholder || input.type);
     for (const row of document.querySelectorAll(".row:not([tabindex]),.pcard:not([tabindex]),.crumb:not([tabindex])")) {
         row.tabIndex = 0;
         row.setAttribute("role", "button");

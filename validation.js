@@ -27,7 +27,20 @@ function secret(fields) {
     if (fields.expiresAt && !Number.isFinite(Date.parse(fields.expiresAt))) throw new Error("Invalid expiry date");
 }
 
+function wildcards(value) {
+    if (value === undefined || value === null) return {};
+    object(value);
+    const out = {};
+    for (const k of Object.keys(value)) {
+        if (![ "allProjects", "anyRoot" ].includes(k)) throw new Error("Unknown agent access option");
+        if (typeof value[k] !== "boolean") throw new Error("Agent access options must be true or false");
+        out[k] = value[k];
+    }
+    return out;
+}
+
 module.exports = {
+    wildcards: wildcards,
     text: text,
     password: password,
     object: object,

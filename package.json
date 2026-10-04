@@ -3,6 +3,10 @@
   "version": "0.1.0-preview.1",
   "description": "A local-first macOS vault that lets coding agents use project secrets without returning them in tool responses.",
   "main": "main.js",
+  "bin": {
+    "vaultos": "cli.cjs",
+    "vaultos-agent": "agent-cli.cjs"
+  },
   "type": "commonjs",
   "license": "MIT",
   "engines": {
@@ -24,6 +28,7 @@
     "check": "node scripts/check.mjs && npm test",
     "build:native": "node scripts/build-native.mjs",
     "dist:mac": "node scripts/package-mac.mjs",
+    "dist:linux": "node scripts/package-linux.mjs",
     "mcp": "node mcp/server.mjs"
   },
   "dependencies": {

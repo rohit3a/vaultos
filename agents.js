@@ -23,7 +23,9 @@ class Agents {
             revoked: !!a.revokedAt,
             revokedAt: a.revokedAt || null,
             projects: a.projects || [],
-            roots: a.roots || []
+            roots: a.roots || [],
+            allProjects: a.allProjects === true,
+            anyRoot: a.anyRoot === true
         }));
     }
     find(id) {
@@ -33,9 +35,10 @@ class Agents {
         const v = String(name || "").toLowerCase();
         return this.all().find(a => a.name.toLowerCase() === v) || null;
     }
-    enrol(name, scopes, projects = [], roots = []) {
+    enrol(name, scopes, projects = [], roots = [], wildcards = {}) {
         require("./validation").text(name, "agent name", 100);
         const access = this.validateAccess(projects, roots);
+        const flags = require("./validation").wildcards(wildcards);
         if (!name || !String(name).trim()) throw new Error("agent name required");
         if (this.byName(name)) throw new Error(`an agent named "${name}" is already enrolled`);
         if (scopes !== undefined && !Array.isArray(scopes)) throw new Error("Scopes must be an array");
@@ -48,6 +51,8 @@ class Agents {
             tokenHash: sha256(token),
             scopes: scopes === undefined ? [ ...DEFAULT_SCOPES ] : [ ...new Set(scopes) ],
             ...access,
+            allProjects: flags.allProjects === true,
+            anyRoot: flags.anyRoot === true,
             enrolledAt: (new Date).toISOString(),
             lastSeenAt: null,
             revokedAt: null
@@ -59,6 +64,8 @@ class Agents {
             name: agent.name,
             ref: agentRef(agent.id),
             scopes: agent.scopes,
+            allProjects: agent.allProjects,
+            anyRoot: agent.anyRoot,
             token: token
         };
     }
@@ -82,15 +89,18 @@ class Agents {
             roots: [ ...new Set(folders) ]
         };
     }
-    setAccess(id, projects, roots) {
+    setAccess(id, projects, roots, wildcards) {
         const a = this.find(id);
         if (!a) throw new Error("Agent not found");
-        Object.assign(a, this.validateAccess(projects, roots));
+        const flags = require("./validation").wildcards(wildcards);
+        Object.assign(a, this.validateAccess(projects, roots), flags);
         this.store.persist();
         return {
             id: a.id,
             projects: a.projects,
-            roots: a.roots
+            roots: a.roots,
+            allProjects: a.allProjects === true,
+            anyRoot: a.anyRoot === true
         };
     }
     reissue(id) {

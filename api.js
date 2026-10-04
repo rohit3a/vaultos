@@ -4,6 +4,8 @@ const http = require("node:http");
 
 const path = require("node:path");
 
+const fs = require("node:fs");
+
 const {randomToken: randomToken, safeEqual: safeEqual} = require("./crypto");
 
 const {Agents: Agents} = require("./agents");
@@ -16,9 +18,11 @@ const M = require("./model");
 
 const V = require("./validation");
 
+const {relayDecision: relayDecision} = require("./approvals");
+
 const MAX_BODY = 1024 * 1024;
 
-function startApi(store, {onShutdown: onShutdown = null} = {}) {
+function startApi(store, {onShutdown: onShutdown = null, autoSync: autoSync = null} = {}) {
     const token = randomToken();
     const agents = new Agents(store);
     const server = http.createServer({
@@ -39,14 +43,18 @@ function startApi(store, {onShutdown: onShutdown = null} = {}) {
         if (!/^127\.0\.0\.1:\d+$/.test(req.headers.host || "")) return send(403, {
             error: "Invalid host"
         });
+        const owner = safeEqual(req.headers.authorization, `Bearer ${token}`);
         if (req.url === "/status" && req.method === "GET") return send(200, {
             app: "VaultOS-Preview",
             ok: true,
             locked: !store.isUnlocked(),
             formatVersion: M.FORMAT_VERSION,
-            deployment: deployment()
+            deployment: deployment(),
+            sync: autoSync ? owner ? autoSync.status() : autoSync.publicStatus() : {
+                state: "NOT_RUNNING"
+            }
         });
-        if (!safeEqual(req.headers.authorization, `Bearer ${token}`)) return send(401, {
+        if (!owner) return send(401, {
             error: "Unauthorized"
         });
         if (req.url === "/shutdown" && req.method === "POST" && onShutdown) {
@@ -56,14 +64,45 @@ function startApi(store, {onShutdown: onShutdown = null} = {}) {
             setTimeout(onShutdown, 10);
             return;
         }
+        // Owner control, like /shutdown: the session token alone, never an agent. It cannot
+        // accept conflicts or return values; it runs the same round autosync would.
+        if (req.url === "/sync" && req.method === "POST") {
+            if (req.headers["x-vault-agent-token"]) return send(403, {
+                error: "Agents cannot trigger sync"
+            });
+            if (!autoSync) return send(404, {
+                error: "Not found"
+            });
+            try {
+                const result = autoSync.run({
+                    manual: true
+                });
+                return send(200, {
+                    ok: result.state === "OK",
+                    ...result
+                });
+            } catch (e) {
+                return send(e.status || 409, {
+                    error: e.message
+                });
+            }
+        }
         if (!store.isUnlocked()) return send(423, {
             error: "Vault is locked. Unlock the app."
         });
-        const agent = agents.authenticate(req.headers["x-vault-agent-token"]);
-        if (!agent) return send(403, {
+        try {
+            store.reloadIfChanged();
+        } catch {
+            return send(409, {
+                error: "The vault changed on disk and could not be reloaded. Unlock the app again."
+            });
+        }
+        const relay = req.url === "/pending/decide" && req.method === "POST";
+        const agent = relay ? null : agents.authenticate(req.headers["x-vault-agent-token"]);
+        if (!relay && !agent) return send(403, {
             error: "An enrolled, active agent token is required"
         });
-        agents.touch(agent);
+        if (agent) agents.touch(agent);
         let size = 0, exceeded = false;
         const chunks = [];
         req.on("error", () => send(400, {
@@ -85,8 +124,8 @@ function startApi(store, {onShutdown: onShutdown = null} = {}) {
                 if (!store.isUnlocked()) return send(423, {
                     error: "Vault is locked. Unlock the app."
                 });
-                const currentAgent = agents.authenticate(req.headers["x-vault-agent-token"]);
-                if (!currentAgent) return send(403, {
+                const currentAgent = relay ? null : agents.authenticate(req.headers["x-vault-agent-token"]);
+                if (!relay && !currentAgent) return send(403, {
                     error: "Agent access was revoked"
                 });
                 let body = {};
@@ -97,7 +136,7 @@ function startApi(store, {onShutdown: onShutdown = null} = {}) {
                     body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
                     V.object(body);
                 }
-                const result = route(req, body, store, currentAgent, agents);
+                const result = relay ? relayDecision(store, req.headers["x-vault-approver"], body) : route(req, body, store, currentAgent, agents);
                 send(200, result);
             } catch (e) {
                 send(e.status || 400, {
@@ -130,16 +169,24 @@ function route(req, body, store, agent, agents) {
     const scope = name => {
         if (!agent.scopes.includes(name)) deny("This agent does not have the " + name + " scope");
     };
-    const allowed = id => (agent.projects || []).includes(id);
+    const allowed = id => !!id && (agent.allProjects === true || (agent.projects || []).includes(id));
     const project = name => {
         const result = store.findProject(name);
         if (!result || !allowed(result.id)) deny("Project is not approved for this agent");
         return result;
     };
     const file = target => {
-        const resolved = checkedPath(target, agent.roots || []);
-        if (resolved === store.dataDir || resolved.startsWith(store.dataDir + path.sep)) deny("Vault files are not export destinations");
+        const resolved = agent.anyRoot === true ? canonicalTarget(target) : checkedPath(target, agent.roots || []);
+        const data = fs.realpathSync(store.dataDir);
+        for (const dir of [ store.dataDir, data ]) if (resolved === dir || resolved.startsWith(dir + path.sep)) deny("Vault files are not export destinations");
         return resolved;
+    };
+    const createProject = name => {
+        scope("add");
+        const created = store.createProject(name, actor);
+        agent.projects = [ ...agent.projects || [], created.id ];
+        store.persist();
+        return created;
     };
     const writeSecret = (proj, fields) => {
         const existing = store.findSecret(proj, fields.key);
@@ -151,19 +198,15 @@ function route(req, body, store, agent, agents) {
         name: agent.name,
         scopes: agent.scopes,
         projects: agent.projects || [],
-        roots: agent.roots || []
+        roots: agent.roots || [],
+        allProjects: agent.allProjects === true,
+        anyRoot: agent.anyRoot === true
     };
     if (p === "/projects" && m === "GET") {
         scope("read");
         return store.listProjects().filter(x => allowed(x.id));
     }
-    if (p === "/projects" && m === "POST") {
-        scope("add");
-        const created = store.createProject(body.name, actor);
-        agent.projects = [ ...agent.projects || [], created.id ];
-        store.persist();
-        return created;
-    }
+    if (p === "/projects" && m === "POST") return createProject(body.name);
     const match = p.match(/^\/projects\/([^/]+)\/secrets(?:\/([^/]+))?$/);
     if (match) {
         const proj = project(decodeURIComponent(match[1]));
@@ -206,10 +249,12 @@ function route(req, body, store, agent, agents) {
     }
     if (p === "/import" && m === "POST") {
         scope("add");
-        const proj = project(body.project), source = file(body.env_path);
+        if (body.createProject !== undefined && typeof body.createProject !== "boolean") throw new Error("createProject must be boolean");
+        const source = file(body.env_path);
         require("./fs-safe").regularFile(source, {
             maxBytes: 1024 * 1024
         });
+        const proj = body.createProject === true && !store.findProject(body.project) ? createProject(body.project) : project(body.project);
         const values = require("dotenv").parse(require("node:fs").readFileSync(source));
         const keys = [], refused = [];
         for (const [key, value] of Object.entries(values)) {
@@ -233,6 +278,24 @@ function route(req, body, store, agent, agents) {
     const e = new Error("Not found");
     e.status = 404;
     throw e;
+}
+
+function canonicalTarget(file) {
+    if (typeof file !== "string" || !path.isAbsolute(file) || file.includes("\0")) throw new Error("An absolute file path is required");
+    let base = path.resolve(file);
+    const rest = [];
+    for (;;) {
+        try {
+            fs.lstatSync(base);
+            break;
+        } catch (e) {
+            if (e.code !== "ENOENT" || base === path.dirname(base)) throw e;
+            rest.unshift(path.basename(base));
+            base = path.dirname(base);
+        }
+    }
+    if (!rest.length && fs.lstatSync(base).isSymbolicLink()) throw new Error("Symbolic links are not allowed as file paths");
+    return path.join(fs.realpathSync(base), ...rest);
 }
 
 module.exports = {

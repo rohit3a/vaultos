@@ -667,7 +667,13 @@ class Sync {
         }
         plan.deletedProjects = [];
         const projectTombs = [ ...remoteTombs.keys() ].filter(r => r.startsWith("project:")).map(r => r.slice("project:".length));
-        if (apply && plan.conflicts.length && !arguments[0]?.acceptConflicts) throw new Error("Concurrent edits detected. Back up both vaults and review the conflict plan before accepting its revisions");
+        if (apply && plan.conflicts.length && !arguments[0]?.acceptConflicts) {
+            const e = new Error("Concurrent edits detected. Back up both vaults and review the conflict plan before accepting its revisions");
+            e.state = "CONFLICTS_PENDING";
+            e.status = 409;
+            e.conflicts = plan.conflicts.length;
+            throw e;
+        }
         if (apply && unreadable.length) {
             const e = new Error(`${unreadable.length} record file(s) in the sync repo could not be decrypted: ` + unreadable.slice(0, 3).map(u => u.file).join(", "));
             e.code = "UNREADABLE_RECORDS";
