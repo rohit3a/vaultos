@@ -199,6 +199,35 @@ test("remembered background unlock works through the Linux keyring only after op
     assert.equal(store.autoUnlock(), false);
 });
 
+test("macOS keyring uses the native helper protocol and is unavailable without the helper", {
+    skip: skip
+}, t => {
+    const {dir: dir} = fixture(t);
+    const keyring = new Keyring(path.join(dir, "data"), {
+        platform: "darwin",
+        env: {}
+    });
+    keyring.helper = path.join(dir, "missing-helper");
+    assert.equal(keyring.describe().store, "unavailable");
+    assert.throws(() => keyring.set(PW), /helper is unavailable/);
+    const item = path.join(dir, "helper-item.json");
+    keyring.helper = path.join(dir, "vaultos-keychain");
+    fs.writeFileSync(keyring.helper, `#!${process.execPath}
+const fs = require("node:fs"), r = JSON.parse(fs.readFileSync(0, "utf8")), file = ${JSON.stringify(item)};
+if (!r.service.startsWith("org.vaultos.preview.")) process.exit(2);
+if (r.action === "set") fs.writeFileSync(file, JSON.stringify(r.password));
+if (r.action === "delete") fs.rmSync(file, { force: true });
+process.stdout.write(JSON.stringify(r.action === "get" && fs.existsSync(file) ? { password: JSON.parse(fs.readFileSync(file, "utf8")) } : {}));
+`, {
+        mode: 448
+    });
+    assert.equal(keyring.describe().store, "macos-keychain");
+    assert.equal(keyring.set(PW).secure, true);
+    assert.equal(keyring.get(), PW);
+    keyring.clear();
+    assert.equal(keyring.get(), null);
+});
+
 test("password remembering is unavailable on unsupported platforms", t => {
     const keyring = new Keyring(path.join(os.tmpdir(), "vaultos-unused"), {
         platform: "win32",
