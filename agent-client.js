@@ -8,7 +8,7 @@ const {spawn: spawn, spawnSync: spawnSync} = require("node:child_process");
 
 const {defaultDataDir: defaultDataDir} = require("./paths");
 
-const {readSession: readSession} = require("./session");
+const {readSession: readSession, pidAlive: pidAlive} = require("./session");
 
 const {regularFile: regularFile} = require("./fs-safe");
 
@@ -148,7 +148,7 @@ function defaultStartBackend(dataDir, {useService: useService}) {
 }
 
 class VaultClient {
-    constructor({dataDir: dataDir = defaultDataDir(), env: env = process.env, autostart: autostart = true, startBackend: startBackend = defaultStartBackend, attempts: attempts = 30, interval: interval = 300} = {}) {
+    constructor({dataDir: dataDir = defaultDataDir(), env: env = process.env, autostart: autostart = true, startBackend: startBackend = defaultStartBackend, attempts: attempts = 30, interval: interval = 300, busyWaitMs: busyWaitMs = 75e3} = {}) {
         this.dataDir = dataDir;
         this.sessionPath = path.join(dataDir, "session.json");
         this.startPath = path.join(dataDir, "session.json.starting");
@@ -156,6 +156,7 @@ class VaultClient {
         this.startBackend = startBackend;
         this.attempts = attempts;
         this.interval = interval;
+        this.busyWaitMs = busyWaitMs;
         this.useService = !env.VAULTOS_DATA_DIR && !process.env.VAULTOS_DATA_DIR && path.resolve(dataDir) === path.resolve(defaultDataDir());
         this.launching = null;
         try {
@@ -187,8 +188,21 @@ class VaultClient {
             return null;
         }
     }
+    // An owner busy with a sync round (git and age run synchronously, up to the git timeout)
+    // cannot answer /status. While the process named in the session file is alive, keep
+    // waiting for it instead of reporting it as not running or starting a second backend.
+    async waitForBusyOwner() {
+        const session = readSession(this.sessionPath);
+        if (!session || !Number.isInteger(session.pid) || session.pid <= 0 || session.pid === process.pid) return null;
+        const deadline = Date.now() + this.busyWaitMs;
+        while (Date.now() < deadline && pidAlive(session.pid)) {
+            const current = await this.live(2500);
+            if (current) return current;
+        }
+        return null;
+    }
     async ensureUp() {
-        const current = await this.live();
+        const current = await this.live() || await this.waitForBusyOwner();
         if (current) return current;
         if (!this.autostart) throw new VaultError("not_running", MESSAGES.notRunning);
         if (fs.existsSync(path.join(this.dataDir, "locked"))) throw new VaultError("locked", MESSAGES.humanLocked);
