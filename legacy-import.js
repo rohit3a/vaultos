@@ -27,7 +27,7 @@ const session = require("./session");
 
 const {passwordPrompt: passwordPrompt} = require("./prompt");
 
-const USAGE = "usage: node cli.cjs import-legacy --from <earlier-data-dir> [--plan] [--grant-all-existing-agents] [--lock-policy soft|hard] [--auto-sync] [--password-stdin]";
+const USAGE = "usage: node cli.cjs import-legacy --from <earlier-data-dir> [--plan] [--grant-all-existing-agents] [--lock-policy soft|hard] [--auto-sync] [--remember-password [--touch-id]] [--password-stdin]";
 
 const UNDOABLE = new Set([ "create_secret", "update_secret", "delete_secret", "create_project", "delete_project" ]);
 
@@ -263,6 +263,12 @@ function transform(raw, options = {}) {
         enabled: true,
         intervalSeconds: 120
     };
+    if (options.rememberPassword) settings.rememberPassword = true;
+    if (options.touchId) settings.touchId = {
+        unlock: true,
+        humanActions: false,
+        autoPrompt: true
+    };
     vault.settings = settings;
     const report = {
         fromFormat: fromFormat,
@@ -293,6 +299,12 @@ function transform(raw, options = {}) {
                 } : {},
                 ...options.autoSync ? {
                     autoSync: true
+                } : {},
+                ...options.rememberPassword ? {
+                    rememberPassword: true
+                } : {},
+                ...options.touchId ? {
+                    touchIdUnlock: true
                 } : {}
             },
             notCarried: Object.keys(old).filter(k => !carried.includes(k)).sort()
@@ -368,6 +380,12 @@ function parse(argv) {
             },
             "auto-sync": {
                 type: "boolean"
+            },
+            "remember-password": {
+                type: "boolean"
+            },
+            "touch-id": {
+                type: "boolean"
             }
         },
         allowPositionals: true,
@@ -375,12 +393,15 @@ function parse(argv) {
     });
     if (positionals.length || !v.from) throw new Error(USAGE);
     if (v["lock-policy"] !== undefined && ![ "soft", "hard" ].includes(v["lock-policy"])) throw new Error("--lock-policy must be soft or hard");
+    if (v["touch-id"] && !v["remember-password"]) throw new Error("--touch-id needs --remember-password (Touch ID unlock reads the remembered password)");
     return {
         from: path.resolve(v.from),
         plan: v.plan === true,
         grantAll: v["grant-all-existing-agents"] === true,
         lockPolicy: v["lock-policy"],
-        autoSync: v["auto-sync"] === true
+        autoSync: v["auto-sync"] === true,
+        rememberPassword: v["remember-password"] === true,
+        touchId: v["touch-id"] === true
     };
 }
 
@@ -529,11 +550,23 @@ async function runImportLegacy(argv, {dataDir: dataDir = defaultDataDir(), readP
         throw e;
     }
     if (opts.plan) return out;
+    // Explicit opt-in: remember the password in this platform's secure keyring so the app
+    // and service can unlock without typing it. Refuse before writing if that is impossible.
+    const keyring = opts.rememberPassword ? new (require("./keyring").Keyring)(dataDir) : null;
+    if (keyring && !keyring.describe().secure) throw new Error(`--remember-password: ${keyring.describe().detail}`);
     privateDir(dataDir);
     const release = session.claim(dataDir);
     process.on("exit", release);
     try {
         out.written = writeTarget(dataDir, opts.from, vault, password, tokens, report);
+        if (keyring) {
+            keyring.set(password);
+            out.written.rememberedPassword = keyring.describe().store;
+            if (opts.touchId) atomicWrite(path.join(dataDir, "touch-id"), JSON.stringify({
+                unlock: true,
+                autoPrompt: true
+            }));
+        }
     } finally {
         release();
     }

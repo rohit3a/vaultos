@@ -435,3 +435,18 @@ test("import-legacy --grant-all-existing-agents grants non-revoked agents and ap
     assert.equal(settings.autoSync.enabled, true);
     assert.equal(settings.rememberPassword, false);
 });
+
+test("import-legacy --touch-id needs --remember-password, and --plan reports both options without touching a keyring", async t => {
+    const {legacy: legacy, target: target, run: run} = setup(t);
+    const lone = await run([ "--from", legacy.dir, "--touch-id", "--plan" ]);
+    assert.notEqual(lone.code, 0);
+    assert.match(lone.stderr, /--touch-id needs --remember-password/);
+    const plan = await run([ "--from", legacy.dir, "--remember-password", "--touch-id", "--plan" ]);
+    assert.equal(plan.code, 0, plan.stderr);
+    assert.deepEqual(plan.out.settings.applied, {
+        rememberPassword: true,
+        touchIdUnlock: true
+    });
+    assert.equal(fs.existsSync(path.join(target, "vault.enc")), false);
+    assert.equal(fs.existsSync(path.join(target, "touch-id")), false);
+});

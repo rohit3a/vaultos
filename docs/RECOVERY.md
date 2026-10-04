@@ -40,7 +40,7 @@ The earlier directory is `~/Library/Application Support/vault-os` on macOS and `
 - A shared agent token file (`agent-token`, or `agents/NAME.token`) whose hash matches an enrolled agent is copied to `<data directory>/agents/NAME.token` (0600); set `VAULTOS_AGENT=NAME` for that agent's bridge. Tokens are never printed.
 - This build has no separate "denied" state: keys denied in the earlier app arrive held for approval. Deny (which removes them) or approve them in VaultOS.
 - `audit.log` is copied with an import entry appended, and `backups/*.enc` are copied unchanged. Those backups remain in the earlier envelope and password; this build can read them.
-- The PDF export password and approval relay hash carry over. `--lock-policy soft|hard` and `--auto-sync` set those options; background access stays off until you enable it in the app.
+- The PDF export password and approval relay hash carry over. `--lock-policy soft|hard` and `--auto-sync` set those options. Background access stays off unless you pass `--remember-password`, which stores the master password in the macOS Keychain or Linux Secret Service (the import refuses if neither is available); add `--touch-id` to turn on Touch ID unlock.
 
 To roll back, quit VaultOS Preview and remove the new preview data directory. The earlier data directory is unchanged.
 
