@@ -1,6 +1,6 @@
 # Backups, recovery, migration, and removal
 
-The preview uses `~/Library/Application Support/VaultOS-Preview` on macOS. It never searches or migrates older app data automatically. The directory is private (0700); sensitive files are 0600. Keep backups on encrypted storage with appropriate access controls.
+The preview uses `~/Library/Application Support/VaultOS-Preview` on macOS and `~/.config/VaultOS-Preview` (or `$XDG_CONFIG_HOME/VaultOS-Preview`) on Linux. It never searches or migrates older app data automatically. The directory is private (0700); sensitive files are 0600. Keep backups on encrypted storage with appropriate access controls.
 
 ## Back up
 
@@ -35,3 +35,5 @@ A process ownership lock prevents desktop/backend/CLI overlap. A disk hash check
 ## Uninstall
 
 Quit **VaultOS Preview**, remove its MCP client entry, and delete the preview app. Preserve an encrypted backup if needed. To forget background access, disable it in Settings or click Lock before quitting. Its Keychain service begins with `org.vaultos.preview.`; delete only the matching preview entry if manual cleanup is necessary. Then remove only the preview data directory and your preview agent token file. The app creates no login item, launch agent, automatic updater, or system service.
+
+On Linux, the remembered password is a Secret Service item whose `service` attribute begins with `org.vaultos.preview.`; disabling background access removes it, or delete only that item in a keyring manager such as Seahorse. If you installed the backend unit, run `systemctl --user disable --now vaultos-preview-backend.service` and remove `~/.config/systemd/user/vaultos-preview-backend.service`. Then remove the install folder (default `~/.local/opt/vaultos-preview`) and `~/.local/share/applications/org.vaultos.preview.desktop`.

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Linux (source-built preview): optional password remembering through the Secret Service (`secret-tool`) with no plaintext fallback, `npm run dist:linux` packaging, a per-user installer with run-time Chromium sandbox detection, and an opt-in systemd user unit for the headless backend.
 - Sync: a pull no longer marks unpushed local records as already published. A local edit kept by `sync accept-conflicts` stayed on that device: the next push skipped it and `sync status` reported nothing outgoing. The push index now matches what the sync repository holds, and an index affected by the old behavior is repaired by the next pull.
 - Sync: conflicting versions with the same revision and timestamp now resolve by content hash, so every device keeps the same version instead of each keeping its own.
 

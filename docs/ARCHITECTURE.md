@@ -5,7 +5,7 @@ Human → sandboxed renderer → narrow preload IPC → main process / Store
                                                      ↑
 Coding client → MCP stdio bridge → authenticated localhost API
                                                      ↓
-                             encrypted vault + optional Keychain helper
+             encrypted vault + optional Keychain helper / Secret Service
                                                      ↓
                          optional age ciphertext + signed Git sync
 ```
@@ -16,7 +16,7 @@ Coding client → MCP stdio bridge → authenticated localhost API
 
 `api.js` authorizes each agent request independently. Session identity is distinct from agent identity. `agents.js` validates enrollment, scopes and canonical folder/project grants. `mcp/server.mjs` holds the integration token and forwards tool requests; injection does not return secret values. `set_secret` and `reveal_secret` necessarily carry values through the bridge when permitted.
 
-`session.js` coordinates one owner process and validates runtime session discovery. `backend.cjs` is an optional separate owner that can start only with explicitly remembered Keychain access. The CLI requires a hidden password prompt and claims ownership for decrypted operations. Neither a backend nor the desktop is installed as a system service.
+`session.js` coordinates one owner process and validates runtime session discovery. `keyring.js` stores an explicitly remembered password through the native macOS Keychain helper or, on Linux, libsecret's `secret-tool`, both over stdin and in the preview's service namespace; it has no plaintext fallback. `backend.cjs` is an optional separate owner that can start only with that remembered password. The CLI requires a hidden password prompt and claims ownership for decrypted operations. Nothing installs the backend or desktop as a system service by default; on Linux, `scripts/install-linux.sh --enable-service` installs an opt-in systemd user unit for the backend.
 
 `sync.js` separates local merging from remote transport. `git.js` uses argument arrays, disabled hooks, known staged paths and remote receipts. Trust pins live inside the encrypted vault; age/signing machine keys and the replay index live in the private data directory. The sync format is specific to this preview and is not a public interoperability standard.
 
