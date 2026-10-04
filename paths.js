@@ -4,18 +4,20 @@ const path = require("node:path");
 
 const os = require("node:os");
 
-function defaultDataDir() {
-    if (process.env.VAULTOS_DATA_DIR) {
-        if (!path.isAbsolute(process.env.VAULTOS_DATA_DIR)) throw new Error("VAULTOS_DATA_DIR must be absolute");
-        return process.env.VAULTOS_DATA_DIR;
+function defaultDataDir({platform: platform = process.platform, env: env = process.env, home: home = os.homedir()} = {}) {
+    if (env.VAULTOS_DATA_DIR) {
+        if (!path.isAbsolute(env.VAULTOS_DATA_DIR)) throw new Error("VAULTOS_DATA_DIR must be absolute");
+        return env.VAULTOS_DATA_DIR;
     }
-    if (process.platform === "darwin") {
-        return path.join(os.homedir(), "Library", "Application Support", "VaultOS-Preview");
+    if (platform === "darwin") {
+        return path.join(home, "Library", "Application Support", "VaultOS-Preview");
     }
-    if (process.platform === "win32") {
-        return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "VaultOS-Preview");
+    if (platform === "win32") {
+        return path.join(env.APPDATA || path.join(home, "AppData", "Roaming"), "VaultOS-Preview");
     }
-    return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "VaultOS-Preview");
+    // The XDG base directory specification says relative values must be ignored.
+    const config = env.XDG_CONFIG_HOME && path.isAbsolute(env.XDG_CONFIG_HOME) ? env.XDG_CONFIG_HOME : path.join(home, ".config");
+    return path.join(config, "VaultOS-Preview");
 }
 
 module.exports = {
