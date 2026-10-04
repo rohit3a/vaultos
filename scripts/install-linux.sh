@@ -69,7 +69,8 @@ trap 'rm -rf "$tmp" ${staging:+"$staging"}' EXIT
 src="${from:-$repo/dist/vaultos-preview-linux-$arch}"
 if [[ -f "$src" ]]; then
   if [[ -f "$src.sha256" ]]; then
-    (cd "$(dirname "$src")" && sha256sum -c "$(basename "$src").sha256") || die "checksum mismatch for $src"
+    if command -v sha256sum >/dev/null; then sum=(sha256sum); else sum=(shasum -a 256); fi
+    (cd "$(dirname "$src")" && "${sum[@]}" -c "$(basename "$src").sha256") || die "checksum mismatch for $src"
   else
     echo "note: no $(basename "$src").sha256 next to the archive; skipping checksum verification"
   fi
