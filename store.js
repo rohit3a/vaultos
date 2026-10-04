@@ -186,6 +186,9 @@ class Store {
         });
         if (fs.existsSync(file)) fs.unlinkSync(file);
     }
+    isAutoUnlockBlocked() {
+        return fs.existsSync(path.join(this.dataDir, "locked"));
+    }
     autoUnlock() {
         return this.autoUnlockStatus().ok;
     }
@@ -799,6 +802,7 @@ class Store {
             rememberPassword: this.vault.settings.rememberPassword === true,
             lockPolicy: this.vault.settings.lockPolicy === "soft" ? "soft" : "hard",
             autoSync: this.autoSyncSettings(),
+            touchId: this.touchIdSettings(),
             keyring: this.keyring.describe(),
             formatVersion: this.vault.formatVersion
         };
@@ -806,7 +810,7 @@ class Store {
     setSettings(patch, actor = M.HUMAN) {
         if (actor !== M.HUMAN) throw new Error("Settings are human-only");
         V.object(patch);
-        if (Object.keys(patch).some(k => ![ "exportPassword", "rememberPassword", "lockPolicy", "autoSync" ].includes(k))) throw new Error("Unknown setting");
+        if (Object.keys(patch).some(k => ![ "exportPassword", "rememberPassword", "lockPolicy", "autoSync", "touchId" ].includes(k))) throw new Error("Unknown setting");
         if (patch.exportPassword !== undefined && patch.exportPassword !== "") V.password(patch.exportPassword);
         if (patch.rememberPassword !== undefined && typeof patch.rememberPassword !== "boolean") throw new Error("Invalid remember setting");
         if (patch.lockPolicy !== undefined && ![ "hard", "soft" ].includes(patch.lockPolicy)) throw new Error("Invalid lock policy");
@@ -824,6 +828,29 @@ class Store {
                 }
             };
         }
+        if (patch.touchId !== undefined) {
+            V.object(patch.touchId);
+            const t = patch.touchId;
+            if (Object.keys(t).some(k => ![ "unlock", "humanActions", "autoPrompt" ].includes(k))) throw new Error("Unknown Touch ID setting");
+            if (Object.values(t).some(v => typeof v !== "boolean")) throw new Error("Invalid Touch ID setting");
+            patch = {
+                ...patch,
+                touchId: {
+                    ...this.touchIdSettings(),
+                    ...t
+                }
+            };
+        }
+        // Touch ID unlock reads the remembered password, so it cannot outlive that setting.
+        const remember = patch.rememberPassword !== undefined ? patch.rememberPassword : this.vault.settings?.rememberPassword === true;
+        if (!remember && (patch.touchId || this.touchIdSettings()).unlock) patch = {
+            ...patch,
+            touchId: {
+                ...patch.touchId || this.touchIdSettings(),
+                unlock: false,
+                autoPrompt: false
+            }
+        };
         if (patch.rememberPassword === true) this.keyring.set(this.password);
         if (patch.rememberPassword === false) this.keyring.clear();
         const before = clone(this.vault.settings || {});
@@ -837,7 +864,52 @@ class Store {
             after: clone(this.vault.settings)
         });
         this.persist();
+        this.writeTouchIdHint();
         return this.getSettings();
+    }
+    touchIdSettings() {
+        const t = this.vault.settings?.touchId || {};
+        const unlock = t.unlock === true;
+        return {
+            unlock: unlock,
+            humanActions: t.humanActions === true,
+            autoPrompt: unlock && t.autoPrompt === true
+        };
+    }
+    // A plaintext, per-device hint so the lock screen knows to offer Touch ID before the
+    // vault is decrypted. It holds no secret; the decrypted setting is checked after unlock.
+    touchIdHint() {
+        const file = path.join(this.dataDir, "touch-id");
+        try {
+            regularFile(file, {
+                optional: true
+            });
+            const h = JSON.parse(fs.readFileSync(file, "utf8"));
+            return {
+                unlock: h.unlock === true,
+                autoPrompt: h.unlock === true && h.autoPrompt === true
+            };
+        } catch {
+            return {
+                unlock: false,
+                autoPrompt: false
+            };
+        }
+    }
+    writeTouchIdHint() {
+        const file = path.join(this.dataDir, "touch-id");
+        try {
+            const t = this.touchIdSettings();
+            if (t.unlock && this.vault.settings?.rememberPassword === true) atomicWrite(file, JSON.stringify({
+                unlock: true,
+                autoPrompt: t.autoPrompt
+            })); else {
+                regularFile(file, {
+                    optional: true
+                });
+                if (fs.existsSync(file)) fs.unlinkSync(file);
+            }
+        } catch {}
     }
     autoSyncSettings() {
         const a = this.vault.settings?.autoSync || {};

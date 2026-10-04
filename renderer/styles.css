@@ -219,3 +219,7 @@ textarea { resize: vertical; min-height: 64px; font-family: ui-monospace, Menlo,
 .badge.agent { background: rgba(120, 170, 255, .14); color: #9dc0ff; border-color: rgba(120, 170, 255, .3); }
 
 .secret .head > svg { width:22px; height:22px; flex:0 0 22px; }
+
+.modal { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.modal .box { width: 100%; max-width: 340px; background: var(--surface-2); border: 1px solid var(--border-mid); border-radius: var(--r-xl); padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+.modal .box .row2 { display: flex; gap: 8px; }

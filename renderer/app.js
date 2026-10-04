@@ -27,6 +27,13 @@ const providerById = id => PROVIDERS.find(p => p.id === id) || PROVIDERS.find(p 
 
 let AGENTS = [];
 
+let TOUCH_ID = {
+    available: false,
+    enabled: false,
+    ready: false,
+    autoPrompt: false
+};
+
 const agentLabel = ref => {
     const a = AGENTS.find(x => x.ref === ref);
     return a ? a.name : (ref || "").replace(/^agent:/, "agent ");
@@ -49,8 +56,11 @@ async function boot() {
     PROVIDERS = await window.vault.providers();
     const s = await window.vault.state();
     document.documentElement.dataset.platform = s.isMac ? "mac" : "other";
+    TOUCH_ID = s.touchId || TOUCH_ID;
+    // Touch ID is offered automatically only when the window opens, never right after Lock.
     view = s.exists ? {
-        name: "unlock"
+        name: "unlock",
+        auto: TOUCH_ID.autoPrompt
     } : {
         name: "setup"
     };
@@ -153,7 +163,11 @@ function renderSetup() {
     pw.focus();
 }
 
-function renderUnlock() {
+async function renderUnlock() {
+    const revision = renderVersion;
+    // Touch ID can come and go (lid closed, lockout, a manual Lock), so ask each time.
+    TOUCH_ID = (await window.vault.state()).touchId || TOUCH_ID;
+    if (revision !== renderVersion) return;
     const wrap = el(`<div class="center"></div>`);
     wrap.appendChild(el(LOCK_GLYPH));
     wrap.appendChild(el(`<h1>VAULT<span class="dot" style="color:var(--orange)">.</span>OS</h1>`));
@@ -178,8 +192,87 @@ function renderUnlock() {
         if (e.key === "Enter") btn.click();
     });
     [ pw, err, btn ].forEach(n => wrap.appendChild(n));
+    if (TOUCH_ID.ready) {
+        const touch = el(`<button class="btn ghost">Unlock with Touch ID</button>`);
+        touch.onclick = async () => {
+            touch.disabled = true;
+            err.textContent = "";
+            try {
+                const r = await window.vault.unlockTouchId();
+                if (r.ok) {
+                    view = {
+                        name: "projects"
+                    };
+                    render();
+                    return;
+                }
+                err.textContent = r.error;
+            } catch (e) {
+                err.textContent = cleanError(e);
+            }
+            touch.disabled = false;
+            pw.focus();
+        };
+        wrap.appendChild(touch);
+        if (view.auto) {
+            view.auto = false;
+            setTimeout(() => touch.click(), 0);
+        }
+    } else if (TOUCH_ID.available && TOUCH_ID.enabled) {
+        wrap.appendChild(el(`<p class="note">Touch ID returns after you enter the master password once.</p>`));
+    }
     $app.appendChild(wrap);
     pw.focus();
+}
+
+const cleanError = e => String(e?.message || e || "The operation failed. Please retry.").replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+
+// Human-only actions. With Touch ID confirmation on, the main process asks for Touch ID; when
+// it cannot (unavailable, cancelled, or not a Mac) it refuses with NEED_PASSWORD, and the
+// master password collected here confirms the action instead. The main process verifies it.
+async function human(name, ...args) {
+    try {
+        return await window.vault[name](...args);
+    } catch (e) {
+        const msg = cleanError(e);
+        if (!msg.startsWith("NEED_PASSWORD")) throw e;
+        if (!await askPassword(msg.replace(/^NEED_PASSWORD: /, ""))) throw new Error("Not confirmed, so nothing was done.");
+        return window.vault[name](...args);
+    }
+}
+
+function askPassword(why) {
+    return new Promise(resolve => {
+        const modal = el(`<div class="modal" role="dialog" aria-modal="true"><div class="box"><div class="note"></div><input type="password" placeholder="Master password" /><div class="err"></div><div class="row2"><button class="btn ghost">Cancel</button><button class="btn">Confirm</button></div></div></div>`);
+        modal.querySelector(".note").textContent = why;
+        const input = modal.querySelector("input"), err = modal.querySelector(".err");
+        const [cancel, ok] = modal.querySelectorAll("button");
+        const done = result => {
+            input.value = "";
+            modal.remove();
+            resolve(result);
+        };
+        cancel.onclick = () => done(false);
+        ok.onclick = async () => {
+            ok.disabled = true;
+            try {
+                const r = await window.vault.confirmHuman(input.value);
+                if (r.ok) return done(true);
+                err.textContent = r.error;
+            } catch (e) {
+                err.textContent = cleanError(e);
+            }
+            ok.disabled = false;
+            input.value = "";
+            input.focus();
+        };
+        input.addEventListener("keydown", e => {
+            if (e.key === "Enter") ok.click();
+            if (e.key === "Escape") cancel.click();
+        });
+        document.body.appendChild(modal);
+        input.focus();
+    });
 }
 
 async function renderProjects() {
@@ -220,7 +313,7 @@ async function renderProjects() {
                 return;
             }
             approveAll.disabled = true;
-            for (const pd of pending) await window.vault.approveInject(pd.project, pd.key, true);
+            for (const pd of pending) await human("approveInject", pd.project, pd.key, true);
             render();
         };
         acts.appendChild(approveAll);
@@ -312,7 +405,7 @@ async function renderProject() {
     const exp = el(`<button class="btn ghost sm" style="flex:0 0 auto" title="Export as password-protected PDF">Export</button>`);
     exp.onclick = async () => {
         exp.textContent = "Exporting…";
-        const r = await window.vault.exportProject(project);
+        const r = await human("exportProject", project);
         if (revision !== renderVersion) return;
         if (r.ok) {
             exp.textContent = "Exported ✓";
@@ -362,7 +455,7 @@ async function renderProject() {
                 shown = false;
                 return;
             }
-            const r = await window.vault.reveal(project, s.key);
+            const r = await human("reveal", project, s.key);
             if (revision !== renderVersion) return;
             const lines = [ (s.provider === "password" ? "Password: " : "Value: ") + (r.value || "(empty)") ];
             if (r.password) lines.push("Account pw: " + r.password);
@@ -373,7 +466,7 @@ async function renderProject() {
         };
         const copyBtn = el(`<button class="iconbtn">Copy</button>`);
         copyBtn.onclick = async () => {
-            await window.vault.copy(project, s.key);
+            await human("copy", project, s.key);
             if (revision !== renderVersion) return;
             copyBtn.textContent = "Copied";
             copyBtn.classList.add("copied");
@@ -411,7 +504,7 @@ async function renderProject() {
         if (s.injectApproved === false) {
             const okBtn = el(`<button class="iconbtn">Approve for .env</button>`);
             okBtn.onclick = async () => {
-                await window.vault.approveInject(project, s.key, true);
+                await human("approveInject", project, s.key, true);
                 render();
             };
             if (revision !== renderVersion) return;
@@ -420,7 +513,7 @@ async function renderProject() {
         if (s.owner && s.owner !== "human") {
             const adoptBtn = el(`<button class="iconbtn" title="Take ownership; the agent can no longer change it">Adopt</button>`);
             adoptBtn.onclick = async () => {
-                await window.vault.adopt(project, s.key);
+                await human("adopt", project, s.key);
                 render();
             };
             if (revision !== renderVersion) return;
@@ -506,7 +599,7 @@ async function renderSecret() {
         const list = await window.vault.secrets(project);
         if (revision !== renderVersion) return;
         const meta = list.find(s => s.key === editing) || {};
-        const revealed = await window.vault.reveal(project, editing);
+        const revealed = await human("reveal", project, editing);
         if (revision !== renderVersion) return;
         current = {
             ...meta,
@@ -805,11 +898,33 @@ async function renderSettings() {
     intervalField.appendChild(interval);
     scroll.appendChild(intervalField);
     scroll.appendChild(el(`<p class="note">Off by default. Uses Git sync configured on this device: pulls and pushes on this interval and a few seconds after each change. It stops and waits for you on conflicts or verification errors, and never accepts conflicts itself.</p>`));
+    TOUCH_ID = (await window.vault.state()).touchId || TOUCH_ID;
+    if (revision !== renderVersion) return;
+    const t = s.touchId || {};
+    // Shown where Touch ID can prompt, and wherever an option is still on so it can be turned off.
+    const showTouchId = TOUCH_ID.available || t.unlock || t.humanActions || t.autoPrompt;
+    const touchBox = (text, checked, needsRemember) => {
+        const label = el(`<label class="note" style="display:flex;gap:10px;margin:12px 0"><input type="checkbox" style="width:auto" /><span></span></label>`);
+        label.querySelector("span").textContent = text;
+        const box = label.querySelector("input");
+        box.checked = checked;
+        box.disabled = !checked && (!TOUCH_ID.available || needsRemember && !s.rememberPassword);
+        if (showTouchId) scroll.appendChild(label);
+        return box;
+    };
+    if (showTouchId) {
+        scroll.appendChild(el(`<div class="section" style="margin-top:18px"><span class="label">Touch ID</span><span class="label">${TOUCH_ID.available ? "available" : "not available now"}</span></div>`));
+        scroll.appendChild(el(`<p class="note">Off by default. Needs background access above, because Touch ID unlock uses the password the Keychain remembers.</p>`));
+    }
+    const touchUnlock = touchBox("Unlock this window with Touch ID", t.unlock === true, true);
+    const touchAuto = touchBox("Ask for Touch ID when the window opens", t.autoPrompt === true, true);
+    const touchHuman = touchBox("Confirm reveal, copy, export, approvals, agent and security changes with Touch ID", t.humanActions === true, true);
+    if (showTouchId) scroll.appendChild(el(`<p class="note">After Lock, the master password is required once. Confirmations cover the next 30 seconds; when Touch ID cannot be shown or is cancelled, the master password is asked instead. Touch ID guards this window only: anything running as your account can still use agent tokens and an unlocked API.</p>`));
     const err = el(`<div class="err"></div>`);
     const save = el(`<button class="btn">Save settings</button>`);
     save.onclick = async () => {
         try {
-            await window.vault.setSettings({
+            await human("setSettings", {
                 ...input.value ? {
                     exportPassword: input.value
                 } : {},
@@ -818,12 +933,20 @@ async function renderSettings() {
                 autoSync: {
                     enabled: auto.checked,
                     intervalSeconds: Number(interval.value)
-                }
+                },
+                ...showTouchId ? {
+                    touchId: {
+                        unlock: touchUnlock.checked,
+                        autoPrompt: touchUnlock.checked && touchAuto.checked,
+                        humanActions: touchHuman.checked
+                    }
+                } : {}
             });
         } catch (e) {
-            err.textContent = e.message;
+            err.textContent = cleanError(e);
             return;
         }
+        err.textContent = "";
         save.textContent = "Saved ✓";
         save.classList.add("copied");
         setTimeout(() => {
@@ -860,7 +983,7 @@ async function renderSettings() {
         }
         pwBtn.textContent = "Rotating…";
         try {
-            const r = await window.vault.changePassword(pwOld.value, pwNew.value);
+            const r = await human("changePassword", pwOld.value, pwNew.value);
             if (revision !== renderVersion) return;
             const done = r.backups.filter(b => b.status === "re-encrypted").length;
             const skipped = r.backups.filter(b => b.status !== "re-encrypted");
@@ -937,13 +1060,13 @@ async function renderAgents() {
         const revealScope = el(`<button class="iconbtn">${a.scopes.includes("reveal") ? "Revoke reveal" : "Grant reveal"}</button>`);
         revealScope.onclick = async () => {
             const next = a.scopes.includes("reveal") ? a.scopes.filter(x => x !== "reveal") : [ ...a.scopes, "reveal" ];
-            await window.vault.setAgentScopes(a.id, next);
+            await human("setAgentScopes", a.id, next);
             render();
             if (revision !== renderVersion) return;
         };
         const reissue = el(`<button class="iconbtn" title="New token, same identity and same keys">Re-issue token</button>`);
         reissue.onclick = async () => {
-            const r = await window.vault.reissueAgent(a.id);
+            const r = await human("reissueAgent", a.id);
             if (revision !== renderVersion) return;
             tok.textContent = `New token (shown once):\n${r.token}\n\nPut it in the private (0600) token file named by VAULTOS_AGENT_TOKEN_FILE in your MCP configuration on the machine running this agent.`;
             tok.style.display = "block";
@@ -961,7 +1084,7 @@ async function renderAgents() {
                 }, 2500);
                 return;
             }
-            await window.vault.revokeAgent(a.id);
+            await human("revokeAgent", a.id);
             render();
             if (revision !== renderVersion) return;
         };
@@ -973,7 +1096,7 @@ async function renderAgents() {
             const saveAccess = el('<button class="btn sm">Save access</button>');
             card.appendChild(saveAccess);
             saveAccess.onclick = async () => {
-                await window.vault.setAgentAccess(a.id, picker.projects(), picker.roots, picker.wildcards());
+                await human("setAgentAccess", a.id, picker.projects(), picker.roots, picker.wildcards());
                 render();
             };
             if (revision !== renderVersion) return;
@@ -1006,7 +1129,7 @@ async function renderAgents() {
     add.onclick = async () => {
         err.textContent = "";
         try {
-            const r = await window.vault.enrolAgent(nameIn.value.trim(), [ ...chosen ], access.projects(), access.roots, access.wildcards());
+            const r = await human("enrolAgent", nameIn.value.trim(), [ ...chosen ], access.projects(), access.roots, access.wildcards());
             if (revision !== renderVersion) return;
             out.textContent = `${r.name} enrolled.\n\nToken (shown once):\n${r.token}\n\nPut it in the private (0600) token file named by VAULTOS_AGENT_TOKEN_FILE in your MCP configuration on that machine.`;
             out.style.display = "block";
@@ -1053,7 +1176,7 @@ async function renderDelegate() {
         const row = el(`<div class="secret"><div class="head"><span class="key">${esc(a.name)}</span><span class="pname">${on ? "may edit this key" : "read only"}</span></div><div class="actions"></div></div>`);
         const btn = el(`<button class="iconbtn ${on ? "danger" : ""}">${on ? "Remove" : "Delegate"}</button>`);
         btn.onclick = async () => {
-            await window.vault.delegate(project, secret, a.ref, !on);
+            await human("delegate", project, secret, a.ref, !on);
             render();
         };
         if (revision !== renderVersion) return;
@@ -1164,7 +1287,7 @@ async function renderSync() {
     identity.onclick = () => run(() => window.vault.syncIdentity());
     const peer = el('<textarea placeholder="Paste verified peer identity JSON" rows="6"></textarea>');
     const trust = el('<button class="btn ghost">Trust verified peer</button>');
-    trust.onclick = () => run(() => window.vault.syncTrust(JSON.parse(peer.value)));
+    trust.onclick = () => run(() => human("syncTrust", JSON.parse(peer.value)));
     const status = el('<button class="btn ghost">Check remote status and conflicts</button>');
     status.onclick = () => run(() => window.vault.syncStatus());
     const push = el('<button class="btn">Push to Git remote</button>');
@@ -1274,6 +1397,12 @@ async function accessPicker(parent, current = {}) {
         })
     };
 }
+
+window.addEventListener("focus", async () => {
+    if (view.name !== "unlock") return;
+    const t = (await window.vault.state()).touchId;
+    if (t && view.name === "unlock" && (t.ready !== TOUCH_ID.ready || t.enabled !== TOUCH_ID.enabled)) render();
+});
 
 window.vault.onLocked(() => {
     AGENTS = [];

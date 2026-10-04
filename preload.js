@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld("vault", {
     copy: (project, key) => ipcRenderer.invoke("vault:copy", project, key),
     init: pw => ipcRenderer.invoke("vault:init", pw),
     unlock: pw => ipcRenderer.invoke("vault:unlock", pw),
+    unlockTouchId: () => ipcRenderer.invoke("vault:unlockTouchId"),
+    confirmHuman: pw => ipcRenderer.invoke("vault:confirmHuman", pw),
     lock: () => ipcRenderer.invoke("vault:lock"),
     projects: () => ipcRenderer.invoke("vault:projects"),
     createProject: name => ipcRenderer.invoke("vault:createProject", name),
