@@ -71,6 +71,20 @@ function dialSvg(cls = "dial") {
     return `<svg class="${cls}" viewBox="-68 -58 136 142" aria-hidden="true" focusable="false">` + `<ellipse cx="0" cy="64" rx="51" ry="11" fill="rgba(80,35,30,0.16)"/>${legs}${arms}` + `<circle r="50" fill="${DIAL.rim}" class="sp-o" stroke-width="3.5"/>${bolts}<circle r="39" fill="${DIAL.door}" class="sp-o" stroke-width="3"/>${hinges}` + `${eye(-1)}${eye(1)}<ellipse cx="-26" cy="7" rx="6" ry="3.6" fill="${DIAL.cheek}"/><ellipse cx="26" cy="7" rx="6" ry="3.6" fill="${DIAL.cheek}"/>` + `<g transform="translate(0 5)"><circle r="13" fill="${DIAL.nose}" class="sp-o" stroke-width="2.6"/>${ticks}<line x1="0" y1="0" x2="0" y2="-8" stroke="${DIAL.rim}" stroke-width="3" stroke-linecap="round"/><circle r="3" fill="${DIAL.rim}"/></g>` + `<path class="sp-o" d="M5.66 25.1A7 7 0 0 1 -5.66 25.1" fill="none" stroke-width="2.6"/></svg>`;
 }
 
+// One coloured initial per project, the same colour for the same name.
+const TILE_COLORS = [ "#b9b0ff", "#7fdbe8", "#7fdcb8", "#ffc566", "#ff9db8" ];
+
+function tileColor(name) {
+    let h = 2166136261;
+    for (const ch of String(name == null ? "" : name)) {
+        h ^= ch.codePointAt(0);
+        h = Math.imul(h, 16777619);
+    }
+    return TILE_COLORS[(h >>> 0) % TILE_COLORS.length];
+}
+
+const initialOf = name => (String(name || "").trim().match(/[\p{L}\p{N}]/u) || [ "#" ])[0].toUpperCase();
+
 // A flat vault-door glyph for the header: ring, dial and one tick.
 const GLYPH = `<svg class="glyph" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4.5" fill="var(--orange)" stroke="currentColor" stroke-width="1.5"/><path d="M12 7.5V5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
 
@@ -177,7 +191,7 @@ function renderSetup() {
     const pw = el(`<input type="password" placeholder="Master password" />`);
     const pw2 = el(`<input type="password" placeholder="Confirm password" />`);
     const err = el(`<div class="err"></div>`);
-    const btn = el(`<button class="btn">Create vault</button>`);
+    const btn = el(`<button class="btn primary">Create vault</button>`);
     btn.onclick = async () => {
         if (pw.value.length < 12) return err.textContent = "Use at least 12 characters.";
         if (pw.value !== pw2.value) return err.textContent = "Passwords do not match.";
@@ -217,7 +231,7 @@ async function renderUnlock() {
     wrap.appendChild(el(`<p>Unlock to let approved agents use your keys. Locks after 15 minutes of inactivity, when the Mac locks, or when you press Lock.</p>`));
     const pw = el(`<input type="password" placeholder="Master password" />`);
     const err = el(`<div class="err"></div>`);
-    const btn = el(`<button class="btn">Unlock</button>`);
+    const btn = el(`<button class="btn primary">Unlock</button>`);
     btn.onclick = async () => {
         const r = await window.vault.unlock(pw.value);
         if (!r.ok) {
@@ -286,7 +300,7 @@ async function human(name, ...args) {
 
 function askPassword(why) {
     return new Promise(resolve => {
-        const modal = el(`<div class="modal" role="dialog" aria-modal="true"><div class="box card"><div class="card-head"><h3 class="card-title">Confirm it's you</h3></div><div class="card-body"><div class="note"></div><input type="password" placeholder="Master password" /><div class="err"></div><div class="row2"><button class="btn ghost">Cancel</button><button class="btn">Confirm</button></div></div></div></div>`);
+        const modal = el(`<div class="modal" role="dialog" aria-modal="true"><div class="box card"><div class="card-head"><h3 class="card-title">Confirm it's you</h3></div><div class="card-body"><div class="note"></div><input type="password" placeholder="Master password" /><div class="err"></div><div class="row2"><button class="btn ghost">Cancel</button><button class="btn primary">Confirm</button></div></div></div></div>`);
         modal.querySelector(".note").textContent = why;
         const input = modal.querySelector("input"), err = modal.querySelector(".err");
         const [cancel, ok] = modal.querySelectorAll("button");
@@ -365,7 +379,7 @@ async function renderProjects() {
     const addToggle = el(`<button class="addtoggle"><span class="plus">+</span> New project</button>`);
     const addForm = el(`<div class="addrow" style="display:none"></div>`);
     const nameInput = el(`<input type="text" placeholder="Project name" />`);
-    const addBtn = el(`<button class="btn sm">Add</button>`);
+    const addBtn = el(`<button class="btn sm primary">Add</button>`);
     const doAdd = async () => {
         const n = nameInput.value.trim();
         if (!n) {
@@ -401,8 +415,7 @@ async function renderProjects() {
         scroll.appendChild(el(`<div class="empty">${dialSvg("dial sm")}<div class="big">No projects yet</div><p>Create one, then add its API keys. To let an agent use them, enrol it under Settings, then Agents. Reveal is off by default.</p></div>`));
     }
     for (const p of projects) {
-        const logos = (p.providers.length ? p.providers : [ "custom" ]).slice(0, 5).map(id => providerById(id).svg).join("");
-        const row = el(`<div class="row">\n      <div class="logos">${logos}</div>\n      <div class="grow"><div class="name">${esc(p.name)}</div><div class="sub">${p.secretCount} ${p.secretCount === 1 ? "key" : "keys"}</div></div>\n      <div class="chev">›</div></div>`);
+        const row = el(`<div class="row">\n      <span class="tile" aria-hidden="true" style="background:${tileColor(p.name)}">${esc(initialOf(p.name))}</span>\n      <div class="grow"><div class="name">${esc(p.name)}</div><div class="sub">${p.secretCount} ${p.secretCount === 1 ? "key" : "keys"}</div></div>\n      <div class="chev">›</div></div>`);
         row.onclick = () => {
             view = {
                 name: "project",
@@ -436,7 +449,7 @@ async function renderProject() {
     if (revision !== renderVersion) return;
     scroll.appendChild(el(`<div class="section"><span class="label">${esc(project)}</span><span class="label">${secrets.length} ${secrets.length === 1 ? "key" : "keys"}</span></div>`));
     const actionRow = el(`<div class="actionrow"></div>`);
-    const add = el(`<button class="btn"><span aria-hidden="true">+</span> Add key</button>`);
+    const add = el(`<button class="btn primary"><span aria-hidden="true">+</span> Add key</button>`);
     add.onclick = () => {
         view = {
             name: "secret",
@@ -445,7 +458,7 @@ async function renderProject() {
         };
         render();
     };
-    const exp = el(`<button class="btn ghost sm" style="flex:0 0 auto" title="Export as password-protected PDF">Export</button>`);
+    const exp = el(`<button class="btn ghost" title="Export as password-protected PDF">Export</button>`);
     exp.onclick = async () => {
         exp.textContent = "Exporting…";
         const r = await human("exportProject", project);
@@ -485,7 +498,7 @@ async function renderProject() {
             const txt = s.expiryStatus === "expired" ? "Expired" : s.daysLeft === 0 ? "Expires today" : `Expires in ${s.daysLeft}d`;
             badges.push(`<span class="badge ${cls}">${txt}</span>`);
         }
-        const card = el(`<div class="secret card">\n      <div class="head">${prov.svg}<span class="key">${esc(s.key)}</span><span class="pname">${esc(prov.name)}</span></div>\n      ${badges.length ? `<div class="badges">${badges.join("")}</div>` : ""}\n      ${sub ? `<div class="note">${sub}</div>` : ""}\n      ${s.note ? `<div class="note">${esc(s.note)}</div>` : ""}\n      <div class="val" data-val style="display:none"></div>\n      <div class="actions"></div></div>`);
+        const card = el(`<div class="secret card">\n      <div class="head">${prov.svg}<span class="key mono">${esc(s.key)}</span><span class="pname">${esc(prov.name)}</span></div>\n      ${badges.length ? `<div class="badges">${badges.join("")}</div>` : ""}\n      ${sub ? `<div class="note">${sub}</div>` : ""}\n      ${s.note ? `<div class="note">${esc(s.note)}</div>` : ""}\n      <div class="val" data-val style="display:none"></div>\n      <div class="actions"></div></div>`);
         const valEl = card.querySelector("[data-val]");
         const actions = card.querySelector(".actions");
         const showBtn = el(`<button class="iconbtn">Reveal</button>`);
@@ -576,7 +589,7 @@ async function renderProject() {
         [ showBtn, copyBtn, editBtn, ...ownActions, delBtn ].forEach(b => actions.appendChild(b));
         scroll.appendChild(card);
     }
-    const del = el(`<button class="btn danger" style="margin-top:18px">Delete project</button>`);
+    const del = el(`<button class="btn danger" style="margin-top:24px">Delete project</button>`);
     let armedP = false;
     del.onclick = async () => {
         if (!armedP) {
@@ -800,7 +813,7 @@ function buildKeysForm(scroll, project, prov, editing, current) {
     const meta = metaFields(prov, current);
     const acct = accountFields(current);
     const err = el(`<div class="err"></div>`);
-    const save = el(`<button class="btn">Save key</button>`);
+    const save = el(`<button class="btn primary">Save key</button>`);
     save.onclick = () => {
         if (!keyInput.value.trim()) {
             err.textContent = "Pick a key or type its name.";
@@ -839,7 +852,7 @@ function buildPasswordForm(scroll, project, prov, editing, current) {
     const noteInput = el(`<input type="text" placeholder="extra context" value="${esc(current ? current.note : "")}" />`);
     noteField.appendChild(noteInput);
     const err = el(`<div class="err"></div>`);
-    const save = el(`<button class="btn">Save password</button>`);
+    const save = el(`<button class="btn primary">Save password</button>`);
     save.onclick = () => {
         if (!labelInput.value.trim()) {
             err.textContent = "Give it a label.";
@@ -878,7 +891,7 @@ function buildCustomForm(scroll, project, prov, editing, current) {
     const meta = metaFields(prov, current);
     const acct = accountFields(current);
     const err = el(`<div class="err"></div>`);
-    const save = el(`<button class="btn">Save</button>`);
+    const save = el(`<button class="btn primary">Save</button>`);
     save.onclick = () => {
         if (!keyInput.value.trim()) {
             err.textContent = "Name is required.";
@@ -972,7 +985,7 @@ async function renderSettings() {
     if (showTouchId) scroll.appendChild(el(`<p class="note">After Lock, the master password is required once. Confirmations cover the next 30 seconds; when Touch ID cannot be shown or is cancelled, the master password is asked instead. Touch ID guards this window only: anything running as your account can still use agent tokens and an unlocked API.</p>`));
     scroll = page;
     const err = el(`<div class="err"></div>`);
-    const save = el(`<button class="btn">Save settings</button>`);
+    const save = el(`<button class="btn primary">Save settings</button>`);
     save.onclick = async () => {
         try {
             await human("setSettings", {
@@ -1058,7 +1071,7 @@ async function renderSettings() {
     scroll.appendChild(pwOut);
     scroll = panel(page, "Agents, sync and history");
     const nav = el(`<div class="navrow"></div>`);
-    const agentsBtn = el(`<button class="btn">Agents</button>`);
+    const agentsBtn = el(`<button class="btn ghost">Agents</button>`);
     agentsBtn.onclick = () => {
         view = {
             name: "agents"
@@ -1107,7 +1120,7 @@ async function renderAgents() {
     const allScopes = await window.vault.allScopes();
     if (revision !== renderVersion) return;
     for (const a of list) {
-        const card = el(`<div class="secret card">\n      <div class="head"><span class="key">${esc(a.name)}</span><span class="pname">${a.revoked ? "revoked" : "active"}</span></div>\n      <div class="badges">${a.scopes.map(x => `<span class="badge ${x === "reveal" ? "exp-amber" : "perm"}">${esc(x)}</span>`).join("")}${a.allProjects ? `<span class="badge allaccess">all projects</span>` : ""}${a.anyRoot ? `<span class="badge allaccess">any folder</span>` : ""}</div>\n      <div class="note">${esc(a.ref)} · enrolled ${esc((a.enrolledAt || "").slice(0, 10))}${a.lastSeenAt ? ` · last seen ${esc(a.lastSeenAt.slice(0, 16).replace("T", " "))}` : " · never used"}</div>\n      <div class="val" data-tok style="display:none"></div>\n      <div class="actions"></div></div>`);
+        const card = el(`<div class="secret card">\n      <div class="head"><span class="key">${esc(a.name)}</span><span class="pname">${a.revoked ? "revoked" : "active"}</span></div>\n      <div class="badges">${a.scopes.map(x => `<span class="badge ${x === "reveal" ? "exp-amber" : "perm"}">${esc(x)}</span>`).join("")}${a.allProjects ? `<span class="badge allaccess">all projects</span>` : ""}${a.anyRoot ? `<span class="badge allaccess">any folder</span>` : ""}</div>\n      <div class="note"><span class="mono">${esc(a.ref)}</span> · enrolled ${esc((a.enrolledAt || "").slice(0, 10))}${a.lastSeenAt ? ` · last seen ${esc(a.lastSeenAt.slice(0, 16).replace("T", " "))}` : " · never used"}</div>\n      <div class="val" data-tok style="display:none"></div>\n      <div class="actions"></div></div>`);
         const actions = card.querySelector(".actions");
         const tok = card.querySelector("[data-tok]");
         const revealScope = el(`<button class="iconbtn">${a.scopes.includes("reveal") ? "Revoke reveal" : "Grant reveal"}</button>`);
@@ -1146,7 +1159,7 @@ async function renderAgents() {
             accessBtn.disabled = true;
             const picker = await accessPicker(card, a);
             if (revision !== renderVersion) return;
-            const saveAccess = el('<button class="btn sm">Save access</button>');
+            const saveAccess = el('<button class="btn ghost sm">Save access</button>');
             card.appendChild(saveAccess);
             saveAccess.onclick = async () => {
                 await human("setAgentAccess", a.id, picker.projects(), picker.roots, picker.wildcards());
@@ -1179,7 +1192,7 @@ async function renderAgents() {
     if (revision !== renderVersion) return;
     const out = el(`<div class="val" style="display:none"></div>`);
     const err = el(`<div class="err"></div>`);
-    const add = el(`<button class="btn">Enrol agent</button>`);
+    const add = el(`<button class="btn primary">Enrol agent</button>`);
     add.onclick = async () => {
         err.textContent = "";
         try {
@@ -1348,7 +1361,7 @@ async function renderSync() {
     push.onclick = () => run(() => window.vault.syncPush());
     const pull = el('<button class="btn">Pull from Git remote</button>');
     pull.onclick = () => run(() => window.vault.syncPull(false));
-    const accept = el('<button class="btn ghost">Pull and accept listed conflict winners</button>');
+    const accept = el('<button class="btn danger outlined">Pull and accept listed conflict winners</button>');
     accept.onclick = () => run(() => window.vault.syncPull(true));
     const group = title => {
         const body = panel(scroll, title);
@@ -1356,11 +1369,19 @@ async function renderSync() {
         return body;
     };
     const thisMachine = group("This machine");
-    for (const n of [ label, init, identity ]) thisMachine.appendChild(n);
+    const machineRow = el('<div class="btnrow"></div>');
+    machineRow.appendChild(init);
+    machineRow.appendChild(identity);
+    thisMachine.appendChild(label);
+    thisMachine.appendChild(machineRow);
     const peers = group("Peers");
     for (const n of [ peer, trust ]) peers.appendChild(n);
     const records = group("Move records");
-    for (const n of [ status, push, pull, accept, el('<p class="note">A remote receipt confirms Git accepted a commit. Other devices must still pull it. Review conflicts before accepting; an encrypted local backup is created before a merge.</p>') ]) records.appendChild(n);
+    const moveRow = el('<div class="btnrow halves"></div>');
+    moveRow.appendChild(push);
+    moveRow.appendChild(pull);
+    const acceptWarn = el('<div class="warn-note risk">Accepting keeps the listed winning versions and overwrites the other copies. An encrypted local backup is made first.</div>');
+    for (const n of [ status, moveRow, el('<p class="note">A remote receipt confirms Git accepted a commit. Other devices must still pull it. Review conflicts before accepting; an encrypted local backup is created before a merge.</p>'), acceptWarn, accept ]) records.appendChild(n);
     scroll.appendChild(output);
 }
 
