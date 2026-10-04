@@ -18,7 +18,7 @@ for (const file of files.filter(f => /\.(js|cjs|mjs)$/.test(f))) execFileSync(pr
     stdio: "pipe"
 });
 
-for (const required of [ "LICENSE", "SECURITY.md", "THIRD_PARTY_NOTICES.md", "renderer/fonts/licenses/Inter-OFL.txt", "renderer/fonts/licenses/SpaceGrotesk-OFL.txt" ]) if (!existsSync(required)) throw new Error("Missing distribution notice: " + required);
+for (const required of [ "LICENSE", "SECURITY.md", "THIRD_PARTY_NOTICES.md", "renderer/fonts/licenses/Inter-OFL.txt", "renderer/fonts/licenses/Nunito-OFL.txt" ]) if (!existsSync(required)) throw new Error("Missing distribution notice: " + required);
 
 const p = JSON.parse(readFileSync("package.json")), lock = JSON.parse(readFileSync("package-lock.json"));
 
