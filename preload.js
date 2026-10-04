@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld("vault", {
         return () => ipcRenderer.removeListener("vault:locked", listener);
     },
     chooseFolder: () => ipcRenderer.invoke("vault:chooseFolder"),
-    setAgentAccess: (id, projects, roots) => ipcRenderer.invoke("vault:setAgentAccess", id, projects, roots),
+    setAgentAccess: (id, projects, roots, wildcards) => ipcRenderer.invoke("vault:setAgentAccess", id, projects, roots, wildcards),
     copy: (project, key) => ipcRenderer.invoke("vault:copy", project, key),
     init: pw => ipcRenderer.invoke("vault:init", pw),
     unlock: pw => ipcRenderer.invoke("vault:unlock", pw),
@@ -28,7 +28,7 @@ contextBridge.exposeInMainWorld("vault", {
     exportProject: project => ipcRenderer.invoke("vault:export", project),
     changePassword: (oldPw, newPw) => ipcRenderer.invoke("vault:changePassword", oldPw, newPw),
     agents: () => ipcRenderer.invoke("vault:agents"),
-    enrolAgent: (name, scopes, projects, roots) => ipcRenderer.invoke("vault:enrolAgent", name, scopes, projects, roots),
+    enrolAgent: (name, scopes, projects, roots, wildcards) => ipcRenderer.invoke("vault:enrolAgent", name, scopes, projects, roots, wildcards),
     reissueAgent: id => ipcRenderer.invoke("vault:reissueAgent", id),
     revokeAgent: id => ipcRenderer.invoke("vault:revokeAgent", id),
     setAgentScopes: (id, scopes) => ipcRenderer.invoke("vault:setAgentScopes", id, scopes),

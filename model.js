@@ -16,6 +16,8 @@ const ALL_SCOPES = [ "read", "add", "edit:own", "edit:delegated", "delete:own", 
 
 const DEFAULT_SCOPES = [ "read", "inject" ];
 
+const AGENT_WILDCARDS = [ "allProjects", "anyRoot" ];
+
 const RECORD_FIELDS = [ "id", "key", "value", "provider", "note", "username", "email", "password", "url", "permission", "expiresAt", "owner", "createdBy", "modifiedBy", "editableBy", "injectApproved", "createdAt", "updatedAt", "rev" ];
 
 function pickRecord(s) {
@@ -146,6 +148,7 @@ module.exports = {
     HUMAN: HUMAN,
     ALL_SCOPES: ALL_SCOPES,
     DEFAULT_SCOPES: DEFAULT_SCOPES,
+    AGENT_WILDCARDS: AGENT_WILDCARDS,
     isAgent: isAgent,
     agentRef: agentRef,
     newSecret: newSecret,
