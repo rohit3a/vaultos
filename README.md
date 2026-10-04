@@ -15,7 +15,7 @@ VaultOS is a local desktop vault with an MCP bridge. Organize credentials by pro
 - **Fewer secrets in chat.** `inject_secrets` writes approved keys to an approved file; its response contains names and counts, not values. Revealing a value requires a separate, off-by-default permission.
 - **A human controls access.** Enroll and revoke individual agents. Choose their projects, output directories, and scopes. Agents cannot widen their own permissions.
 - **Protect existing credentials.** Human-owned entries require explicit delegation before an agent can edit them. Agent-created credentials start awaiting approval for injection.
-- **Local by default.** No account, hosted vault service, telemetry, or automatic cloud upload. Password remembering is optional and uses macOS Keychain without a plaintext fallback.
+- **Local by default.** No account, hosted vault service, telemetry, or automatic cloud upload. Password remembering is optional and uses macOS Keychain or the Linux Secret Service, without a plaintext fallback.
 - **Practical daily tools.** Searchable project records, expiry metadata, short-lived clipboard copies, encrypted PDF export, password rotation, encrypted backups, and guarded undo.
 - **Optional encrypted sync.** Use a separate Git repository with age encryption, pinned peer signing identities, tamper checks, and explicit conflict acceptance.
 
@@ -37,9 +37,23 @@ Create an **Example App** project and add a disposable credential. In **Settings
 
 Use **Lock** when finished. While the desktop is running, Lock, system sleep, screen lock, or 15 minutes without a privileged desktop action stop the local API and clear the decrypted application state. Closing the app also stops its API. If you explicitly enabled background Keychain access, the bridge can start a separate backend after the app closes. Manual lock blocks that until a human unlocks again. The separate headless backend does not monitor screen-lock events; disable background access or use Lock before closing if you need that boundary. Optional opt-in settings change this posture: a soft lock policy keeps agents served while the Mac is locked, an always-on service ([`scripts/install-service-macos.sh`](scripts/install-service-macos.sh)) takes over whenever the window is closed, and autosync keeps [Git sync](docs/SYNC.md) running in the background. Read [SECURITY.md](SECURITY.md) before enabling them.
 
+## Install on Linux
+
+Linux support is a source-built preview: no Linux release artifact is published, and the tested desktop target remains macOS. On an x64 or arm64 desktop with Node.js 22+, from a checkout:
+
+```sh
+npm ci
+npm run dist:linux          # this machine's architecture; VAULTOS_ARCH=x64|arm64 overrides
+scripts/install-linux.sh    # installs to ~/.local/opt/vaultos-preview (--prefix to change)
+```
+
+The installer adds an app-menu entry and a launcher and does not use root. If the kernel restricts unprivileged user namespaces (Ubuntu 24.04+), Chromium's sandbox needs a root-owned setuid `chrome-sandbox`: the installer prints the exact `sudo` command, or runs it with `--harden`. Until then the launcher starts the app with `--no-sandbox` and says so on stderr.
+
+Optional password remembering uses the Secret Service through `secret-tool` (package `libsecret-tools` on Debian/Ubuntu, `libsecret` on Fedora) and a running keyring such as GNOME Keyring. Without them, background access is unavailable; there is no plaintext fallback. `--enable-service` also installs and starts a systemd user unit for this checkout's headless backend. It is never enabled by default and still unlocks only after you enable background access in Settings. Electron does not report screen-lock events on Linux, so screen lock does not lock the vault there; use **Lock**.
+
 ## Storage and recovery
 
-Preview data lives in `~/Library/Application Support/VaultOS-Preview`, with a separate `org.vaultos.preview` Keychain namespace. It does not automatically import older applications' data, tokens, sync repositories, or Keychain entries. `VAULTOS_DATA_DIR` can select an **absolute, new directory** for testing.
+Preview data lives in `~/Library/Application Support/VaultOS-Preview` on macOS and `~/.config/VaultOS-Preview` (or `$XDG_CONFIG_HOME/VaultOS-Preview`) on Linux, with a separate `org.vaultos.preview` Keychain or Secret Service namespace. It does not automatically import older applications' data, tokens, sync repositories, or Keychain entries. `VAULTOS_DATA_DIR` can select an **absolute, new directory** for testing.
 
 Back up `vault.enc` and remember its password. Optional sync has separate machine keys and trust state. Read [backup, recovery, migration, and uninstall](docs/RECOVERY.md) before using real credentials.
 
@@ -55,13 +69,14 @@ npm run build:native
 npm start
 ```
 
-The desktop release targets macOS. Core tests can also run on Linux. To include the optional sync tests, install `age` (`brew install age` on macOS, or your distribution's package). Tests use temporary synthetic vaults.
+The desktop release targets macOS; Linux builds come from `npm run dist:linux` (see above). Core tests run on both. To include the optional sync tests, install `age` (`brew install age` on macOS, or your distribution's package). Tests use temporary synthetic vaults.
 
 ```sh
 npm run check
 npm run test:ui          # macOS with an interactive desktop
 npm run dist:mac         # unsigned preview for this Mac's architecture
 VAULTOS_ARCH=x64 npm run dist:mac
+npm run dist:linux       # unsigned Linux tar.gz; also cross-builds on macOS
 ```
 
 See [development and release instructions](CONTRIBUTING.md), [architecture](docs/ARCHITECTURE.md), and [optional sync](docs/SYNC.md).

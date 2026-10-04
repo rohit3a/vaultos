@@ -1,11 +1,11 @@
 ---
 name: vaultos
-description: Install VaultOS on macOS, connect its MCP bridge to a coding agent, and manage project secrets, access, backups, updates, and troubleshooting. Use when the user asks to set up or operate VaultOS.
+description: Install VaultOS on macOS or Linux, connect its MCP bridge to a coding agent, and manage project secrets, access, backups, updates, and troubleshooting. Use when the user asks to set up or operate VaultOS.
 ---
 
 # VaultOS
 
-VaultOS is a local macOS desktop vault with an enrolled-agent MCP bridge. It can
+VaultOS is a local desktop vault for macOS (Linux as a source-built preview) with an enrolled-agent MCP bridge. It can
 write approved secrets into approved project files without returning their values
 in the MCP response. The resulting files are plaintext: this does not isolate
 secrets from an agent that can read the filesystem or run arbitrary shell commands.
@@ -13,7 +13,7 @@ secrets from an agent that can read the filesystem or run arbitrary shell comman
 ## Choose the workflow
 
 - **Install or connect:** read [references/setup.md](references/setup.md). Identify
-  the target Mac, install mode, source checkout, data directory, and MCP client.
+  the target host and OS, install mode, source checkout, data directory, and MCP client.
   Complete authorized setup; leave password entry, enrollment, and grants to the
   human in the desktop. Verify the resulting identity before using secrets.
 - **Use or manage:** read [references/operations.md](references/operations.md).

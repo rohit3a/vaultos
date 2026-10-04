@@ -12,7 +12,9 @@ import { packager } from "@electron/packager";
 
 import { flipFuses, FuseVersion, FuseV1Options } from "@electron/fuses";
 
-if (process.platform !== "darwin") throw new Error("Build macOS artifacts on macOS");
+import { APP_FILES } from "./app-files.mjs";
+
+if (process.platform !== "darwin") throw new Error("Build macOS artifacts on macOS; use npm run dist:linux for Linux");
 
 const arch = process.env.VAULTOS_ARCH || process.arch;
 
@@ -22,7 +24,7 @@ const pkg = JSON.parse(readFileSync("package.json"));
 
 const stage = mkdtempSync(path.join(tmpdir(), "vaultos-package-"));
 
-const files = [ "main.js", "preload.js", "store.js", "agents.js", "api.js", "crypto.js", "env-file.js", "fs-safe.js", "validation.js", "paths.js", "model.js", "providers.js", "version.js", "keyring.js", "session.js", "backend.cjs", "autosync.js", "sync.js", "git.js", "export.js", "renderer", "mcp", "cli.cjs", "prompt.js", "LICENSE", "THIRD_PARTY_NOTICES.md", "package.json", "package-lock.json", "build/icon_1024.png", "build/AppIcon.icns" ];
+const files = [ ...APP_FILES, "build/AppIcon.icns" ];
 
 try {
     for (const file of files) {

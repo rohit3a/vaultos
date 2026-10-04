@@ -1,0 +1,26 @@
+# systemd user unit template for the VaultOS Preview headless backend.
+#
+# scripts/install-linux.sh --enable-service renders this to
+# ~/.config/systemd/user/vaultos-preview-backend.service, replacing @NODE@ and
+# @BACKEND@ with absolute paths, and enables it. Nothing installs it otherwise.
+#
+# The backend unlocks only when background access was explicitly enabled in the
+# desktop Settings (password remembered in the Secret Service) and a manual lock
+# has not blocked it. Opening the desktop asks the backend to stop and takes over.
+[Unit]
+Description=VaultOS Preview headless backend
+Documentation=https://github.com/rohit3a/vaultos/blob/main/docs/ARCHITECTURE.md
+
+[Service]
+Type=simple
+ExecStart="@NODE@" "@BACKEND@" --service
+Restart=on-failure
+RestartSec=5
+# 2: no vault yet. 3: background access is off, blocked by a manual lock, or the
+# keyring is locked. Retrying cannot fix these and could repeat keyring prompts.
+RestartPreventExitStatus=2 3
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

@@ -47,10 +47,10 @@ Agents cannot enroll, widen scopes or folders, approve their own records, adopt 
 
 ## Optional background helper
 
-The bridge works with the downloaded desktop while the app is open and unlocked. To let the source bridge start its headless backend after the desktop closes, also run `npm run build:native` in that source checkout on macOS (requires command-line developer tools). This builds the same preview-namespaced Keychain helper locally. Without it, keep the desktop open; the bridge never falls back to a plaintext password file. Background access must still be enabled deliberately in desktop Settings.
+The bridge works with the downloaded desktop while the app is open and unlocked. To let the source bridge start its headless backend after the desktop closes, also run `npm run build:native` in that source checkout on macOS (requires command-line developer tools). This builds the same preview-namespaced Keychain helper locally. On Linux no build step is needed; the backend reads the remembered password through `secret-tool` (libsecret) and a running keyring such as GNOME Keyring. Without that, keep the desktop open; the bridge never falls back to a plaintext password file. Background access must still be enabled deliberately in desktop Settings.
 
 For an always-available backend, run `scripts/install-service-macos.sh` from that same checkout. It installs a per-user LaunchAgent (`org.vaultos.preview.backend`) that runs `backend.cjs --service`: it waits while the desktop owns the vault, takes over when the window closes, and exits if background access is off. Pass `--data-dir` or `--sync-repo` only for nondefault absolute paths, `--print` to review the property list first, and `--uninstall` to remove it. `vault_status` reports sync health when autosync is enabled.
 
 ## Locked or unavailable
 
-Unlock the desktop. The bridge can start the backend only when background Keychain access was explicitly enabled and a human lock has not blocked it. A connection interruption after a write is ambiguous: inspect the result before retrying. The bridge does not blindly replay writes.
+Unlock the desktop. The bridge can start the backend only when background access (macOS Keychain or Linux Secret Service) was explicitly enabled and a human lock has not blocked it. A connection interruption after a write is ambiguous: inspect the result before retrying. The bridge does not blindly replay writes.

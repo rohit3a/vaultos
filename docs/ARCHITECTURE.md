@@ -5,7 +5,7 @@ Human → sandboxed renderer → narrow preload IPC → main process / Store
                                                      ↑
 Coding client → MCP stdio bridge → authenticated localhost API
                                                      ↓
-                             encrypted vault + optional Keychain helper
+             encrypted vault + optional Keychain helper / Secret Service
                                                      ↓
                          optional age ciphertext + signed Git sync
 ```
@@ -16,7 +16,7 @@ Coding client → MCP stdio bridge → authenticated localhost API
 
 `api.js` authorizes each agent request independently. Session identity is distinct from agent identity. `agents.js` validates enrollment, scopes and canonical folder/project grants. `mcp/server.mjs` holds the integration token and forwards tool requests; injection does not return secret values. `set_secret` and `reveal_secret` necessarily carry values through the bridge when permitted.
 
-`session.js` coordinates one owner process and validates runtime session discovery. `backend.cjs` is an optional separate owner that can start only with explicitly remembered Keychain access. With `--service` it is long-running: it waits while another process owns the vault (without holding `owner.lock`), retries Keychain unlock with backoff, takes over when the owner exits, returns to waiting after a `/shutdown` handover, restores a removed `session.json`, and reloads `vault.enc` when another writer replaced it. `scripts/install-service-macos.sh` can install it as a per-user LaunchAgent (`org.vaultos.preview.backend`); nothing installs it automatically. The CLI requires a hidden password prompt and claims ownership for decrypted operations, except `sync now`, which asks the running owner to sync.
+`session.js` coordinates one owner process and validates runtime session discovery. `keyring.js` stores an explicitly remembered password through the native macOS Keychain helper or, on Linux, libsecret's `secret-tool`, both over stdin and in the preview's service namespace; it has no plaintext fallback. `backend.cjs` is an optional separate owner that can start only with that remembered password. With `--service` it is long-running: it waits while another process owns the vault (without holding `owner.lock`), retries unlock with backoff, takes over when the owner exits, returns to waiting after a `/shutdown` handover, restores a removed `session.json`, and reloads `vault.enc` when another writer replaced it. Nothing installs it automatically: `scripts/install-service-macos.sh` installs a per-user LaunchAgent (`org.vaultos.preview.backend`) and `scripts/install-linux.sh --enable-service` an opt-in systemd user unit. The CLI requires a hidden password prompt and claims ownership for decrypted operations, except `sync now`, which asks the running owner to sync.
 
 `main.js` applies the vault's `lockPolicy`: screen lock, sleep and idle either fully lock (`hard`, default) or lock only the window while the process keeps owning and serving (`soft`). Manual Lock is always full.
 

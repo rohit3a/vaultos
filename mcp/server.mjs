@@ -45,7 +45,7 @@ function readAgentToken() {
     }
 }
 
-const SETUP_MSG = "Open VaultOS Preview and unlock it. Background unlocking is available only when you explicitly enable Keychain access in Settings.";
+const SETUP_MSG = "Open VaultOS Preview and unlock it. Background unlocking is available only when you explicitly enable background access in Settings.";
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 

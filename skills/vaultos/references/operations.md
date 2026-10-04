@@ -60,12 +60,12 @@ future API calls; it neither removes exported files nor revokes provider keys.
 
 The desktop's **Lock** stops its API, clears decrypted application state, attempts
 to remove the remembered password, and blocks background unlock until a human
-unlocks again. While the desktop runs, sleep, screen lock, and 15 minutes without
-a privileged desktop action also lock it.
+unlocks again. While the desktop runs, sleep, screen lock (macOS only), and 15 minutes
+without a privileged desktop action also lock it.
 
 Closing the desktop stops its API. If the user explicitly enabled background
-Keychain access and built the bridge's native helper, the bridge can start a
-separate backend. That headless backend **does not monitor screen lock**. Keep
+access (macOS: Keychain plus the bridge's native helper; Linux: Secret Service), the
+bridge can start a separate backend, as can the optional Linux systemd unit. That headless backend **does not monitor screen lock**. Keep
 background access off, or use Lock before closing, when that boundary is needed.
 Do not enable password remembering to work around an unavailable or locked vault.
 
@@ -147,5 +147,5 @@ review step in the desktop, never something to automate.
 For requested uninstall, disable background access or Lock, quit the identified
 preview, and remove only its MCP entry and app. Preserve data and encrypted
 backups unless deletion was requested. See the recovery guide for targeted
-preview data, token, and Keychain cleanup; do not remove another vault's files,
-launch agents, or keys.
+preview data, token, Keychain/Secret Service and Linux service cleanup; do not
+remove another vault's files, launch agents, services, or keys.
