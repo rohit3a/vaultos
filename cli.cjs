@@ -15,8 +15,20 @@ async function main() {
         console.log(JSON.stringify(await admin.runAdmin(args), null, 2));
         return;
     }
+    if (command === "import-legacy") {
+        // Explicit, one-time import from the earlier vault-os fork. Never run automatically.
+        try {
+            const result = await require("./legacy-import").runImportLegacy(rest);
+            console.log(JSON.stringify(result, null, 2));
+            if (!result.ok) process.exitCode = 2;
+        } catch (e) {
+            if (e.report) console.log(JSON.stringify(e.report, null, 2));
+            throw e;
+        }
+        return;
+    }
     if (!command || command === "help") {
-        console.log(`VaultOS Preview — local recovery and optional encrypted sync\n  node cli.cjs projects\n  node cli.cjs keys <project>\n  node cli.cjs inject <project> <absolute-file> [dotenv|json|shell]\n  node cli.cjs backup <absolute-directory>\n  node cli.cjs sync init <machine-label>\n  node cli.cjs sync identity\n  node cli.cjs sync trust <peer-identity.json>\n  node cli.cjs sync status|push|pull|plan|accept-conflicts\n  node cli.cjs sync now   (asks the running app or service to sync; no password prompt)\nSet VAULTOS_DATA_DIR / VAULTOS_SYNC_REPO to use non-default preview directories.\nPassword input is hidden. --password-stdin is available for controlled automation.\nQuit the preview app before CLI mutations. This tool never prints secret values.\n\n${admin.HELP}`);
+        console.log(`VaultOS Preview — local recovery and optional encrypted sync\n  node cli.cjs projects\n  node cli.cjs keys <project>\n  node cli.cjs inject <project> <absolute-file> [dotenv|json|shell]\n  node cli.cjs backup <absolute-directory>\n  node cli.cjs sync init <machine-label>\n  node cli.cjs sync identity\n  node cli.cjs sync trust <peer-identity.json>\n  node cli.cjs sync status|push|pull|plan|accept-conflicts\n  node cli.cjs sync now   (asks the running app or service to sync; no password prompt)\nSet VAULTOS_DATA_DIR / VAULTOS_SYNC_REPO to use non-default preview directories.\nPassword input is hidden. --password-stdin is available for controlled automation.\nQuit the preview app before CLI mutations. This tool never prints secret values.\n\n${admin.HELP}\n\nOne-time import from the earlier vault-os fork (into a new, empty data directory):\n  ${require("./legacy-import").USAGE.replace("usage: ", "")}`);
         return;
     }
     const store = new Store;
