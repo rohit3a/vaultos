@@ -615,3 +615,43 @@ test("MCP bridge discovers per-agent tokens, reports status with its hash, and s
     assert(locked.isError);
     assert.match(locked.content[0].text, /running but locked/);
 });
+
+test("client waits for a live but busy owner instead of reporting it as not running", async t => {
+    const dir = fixture(t);
+    let calls = 0;
+    const server = http.createServer((req, res) => {
+        // The first probes hang past their timeout, as during a synchronous sync round.
+        if (++calls <= 2) return setTimeout(() => res.destroy(), 3e3);
+        res.writeHead(200, {
+            "content-type": "application/json"
+        });
+        res.end(JSON.stringify({
+            app: "VaultOS-Preview",
+            ok: true,
+            locked: false,
+            formatVersion: 3
+        }));
+    });
+    await new Promise(r => server.listen(0, "127.0.0.1", r));
+    t.after(() => server.close());
+    const owner = require("node:child_process").spawn("sleep", [ "30" ]);
+    t.after(() => owner.kill());
+    fs.writeFileSync(path.join(dir, "session.json"), JSON.stringify({
+        app: "VaultOS-Preview",
+        port: server.address().port,
+        token: "d".repeat(64),
+        pid: owner.pid
+    }), {
+        mode: 384
+    });
+    let started = 0;
+    const status = await new VaultClient({
+        dataDir: dir,
+        env: {},
+        startBackend: () => {
+            started++;
+        }
+    }).status();
+    assert.equal(status.running, true);
+    assert.equal(started, 0);
+});
