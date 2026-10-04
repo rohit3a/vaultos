@@ -138,7 +138,7 @@ const server = new Server({
 
 const TOOLS = [ {
     name: "vault_status",
-    description: "Check backend availability and report vault format, backend deployment version, and bridge version. This does not authenticate the enrolled agent; use whoami to verify identity and grants.",
+    description: "Check backend availability and report vault format, backend deployment version, bridge version, and sync health (autosync state, last sync time, error, stalled peers). This does not authenticate the enrolled agent; use whoami to verify identity and grants.",
     inputSchema: {
         type: "object",
         properties: {}
@@ -356,6 +356,9 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                     message: SETUP_MSG
                 });
                 const st = await fetch(`http://127.0.0.1:${s.port}/status`, {
+                    headers: {
+                        authorization: `Bearer ${s.token}`
+                    },
                     signal: AbortSignal.timeout(2e3),
                     redirect: "error"
                 }).then(r => r.json()).catch(() => null);
@@ -363,10 +366,20 @@ server.setRequestHandler(CallToolRequestSchema, async req => {
                     unlocked: false,
                     message: SETUP_MSG
                 });
+                const sync = st.sync || {};
                 return ok({
                     unlocked: true,
                     formatVersion: st.formatVersion,
                     deployment: st.deployment,
+                    sync: {
+                        autoSync: sync.enabled === true,
+                        state: sync.state || "NOT_RUNNING",
+                        halted: sync.halted === true,
+                        lastSyncAt: sync.lastSyncAt || null,
+                        error: sync.error || null,
+                        peerStalled: sync.peerStalled === true,
+                        peerProblems: sync.peerProblems || []
+                    },
                     bridge: BRIDGE_VERSION
                 });
             }
