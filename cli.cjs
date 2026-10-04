@@ -11,10 +11,28 @@ async function main() {
     const args = process.argv.slice(2).filter(x => x !== "--password-stdin");
     const [command, ...rest] = args;
     if (!command || command === "help") {
-        console.log(`VaultOS Preview — local recovery and optional encrypted sync\n  node cli.cjs projects\n  node cli.cjs keys <project>\n  node cli.cjs inject <project> <absolute-file> [dotenv|json|shell]\n  node cli.cjs backup <absolute-directory>\n  node cli.cjs sync init <machine-label>\n  node cli.cjs sync identity\n  node cli.cjs sync trust <peer-identity.json>\n  node cli.cjs sync status|push|pull|plan|accept-conflicts\nSet VAULTOS_DATA_DIR / VAULTOS_SYNC_REPO to use non-default preview directories.\nPassword input is hidden. --password-stdin is available for controlled automation.\nQuit the preview app before CLI mutations. This tool never prints secret values.`);
+        console.log(`VaultOS Preview — local recovery and optional encrypted sync\n  node cli.cjs projects\n  node cli.cjs keys <project>\n  node cli.cjs inject <project> <absolute-file> [dotenv|json|shell]\n  node cli.cjs backup <absolute-directory>\n  node cli.cjs sync init <machine-label>\n  node cli.cjs sync identity\n  node cli.cjs sync trust <peer-identity.json>\n  node cli.cjs sync status|push|pull|plan|accept-conflicts\n  node cli.cjs sync now   (asks the running app or service to sync; no password prompt)\nSet VAULTOS_DATA_DIR / VAULTOS_SYNC_REPO to use non-default preview directories.\nPassword input is hidden. --password-stdin is available for controlled automation.\nQuit the preview app before CLI mutations. This tool never prints secret values.`);
         return;
     }
     const store = new Store;
+    if (command === "sync" && rest[0] === "now") {
+        // Ask the running owner (desktop or service) to sync, instead of stopping it.
+        const s = await require("./session").findOwner(store.sessionPath);
+        if (!s) throw new Error("No VaultOS process is serving this vault. Use sync pull and sync push instead.");
+        const response = await fetch(`http://127.0.0.1:${s.port}/sync`, {
+            method: "POST",
+            headers: {
+                authorization: `Bearer ${s.token}`
+            },
+            signal: AbortSignal.timeout(12e4),
+            redirect: "error"
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Sync request refused");
+        console.log(JSON.stringify(result, null, 2));
+        if (!result.ok) process.exitCode = 2;
+        return;
+    }
     if (command === "backup") {
         const target = rest[0];
         if (!target || !path.isAbsolute(target)) throw new Error("Specify an absolute backup directory");

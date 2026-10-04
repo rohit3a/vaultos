@@ -24,6 +24,21 @@ const {createHash: createHash} = require("node:crypto");
 
 const clone = x => x === null || x === undefined ? x : JSON.parse(JSON.stringify(x));
 
+const diskStat = file => {
+    try {
+        const st = fs.statSync(file);
+        return {
+            ino: st.ino,
+            size: st.size,
+            mtimeMs: st.mtimeMs
+        };
+    } catch {
+        return null;
+    }
+};
+
+const AUTO_SYNC_DEFAULT_SECONDS = 120;
+
 function expiryInfo(expiresAt) {
     if (!expiresAt) return {
         expiryStatus: "none",
@@ -49,7 +64,9 @@ class Store {
         this.vault = null;
         privateDir(dataDir);
         this.diskHash = null;
+        this.diskStat = null;
         this.savedVault = null;
+        this.persistListeners = [];
         this.keyring = new Keyring(dataDir);
     }
     exists() {
@@ -80,6 +97,7 @@ class Store {
     }
     unlock(password) {
         regularFile(this.vaultPath);
+        const stat = diskStat(this.vaultPath);
         const bytes = fs.readFileSync(this.vaultPath, "utf8");
         const envelope = JSON.parse(bytes);
         const raw = decryptVault(envelope, password);
@@ -88,6 +106,7 @@ class Store {
         this.vault = vault;
         this.password = password;
         this.diskHash = createHash("sha256").update(bytes).digest("hex");
+        this.diskStat = stat;
         this.savedVault = clone(vault);
         if (this.vault.settings.rememberPassword === true) {
             try {
@@ -168,22 +187,102 @@ class Store {
         if (fs.existsSync(file)) fs.unlinkSync(file);
     }
     autoUnlock() {
-        if (fs.existsSync(path.join(this.dataDir, "locked"))) return false;
-        if (this.isUnlocked()) return true;
-        if (!this.exists()) return false;
+        return this.autoUnlockStatus().ok;
+    }
+    autoUnlockStatus() {
+        if (fs.existsSync(path.join(this.dataDir, "locked"))) return {
+            ok: false,
+            reason: "locked"
+        };
+        if (this.isUnlocked()) return {
+            ok: true
+        };
+        if (!this.exists()) return {
+            ok: false,
+            reason: "no-vault"
+        };
         const pw = this.keyring.get();
-        if (!pw) return false;
+        if (!pw) return {
+            ok: false,
+            reason: "no-password"
+        };
         try {
             this.unlock(pw);
             if (this.vault.settings.rememberPassword !== true) {
                 this.lock();
-                return false;
+                return {
+                    ok: false,
+                    reason: "disabled"
+                };
             }
-            return true;
+            return {
+                ok: true
+            };
         } catch {
             this.lock();
-            return false;
+            return {
+                ok: false,
+                reason: "unlock-failed"
+            };
         }
+    }
+    lockAction(trigger) {
+        // Manual Lock is always a full lock. Closing the window releases ownership without
+        // forgetting the remembered password, as before. The soft policy changes only the
+        // automatic triggers (screen lock, sleep, idle), which then lock the window alone.
+        if (trigger === "manual") return "hard";
+        if (trigger === "window") return "release";
+        return this.isUnlocked() && this.vault.settings?.lockPolicy === "soft" ? "ui" : "hard";
+    }
+    onPersist(fn) {
+        this.persistListeners.push(fn);
+        return () => {
+            this.persistListeners = this.persistListeners.filter(x => x !== fn);
+        };
+    }
+    changedOnDisk() {
+        if (!this.isUnlocked()) return false;
+        const stat = diskStat(this.vaultPath);
+        if (!stat) return false;
+        if (this.diskStat && stat.ino === this.diskStat.ino && stat.size === this.diskStat.size && stat.mtimeMs === this.diskStat.mtimeMs) return false;
+        if (createHash("sha256").update(fs.readFileSync(this.vaultPath)).digest("hex") !== this.diskHash) return true;
+        this.diskStat = stat;
+        return false;
+    }
+    unsavedChanges() {
+        // Agent lastSeenAt is advisory and never persisted on its own. Every other change is
+        // persisted, or rolled back, inside the synchronous call that made it.
+        const strip = v => contentHash({
+            ...v,
+            agents: (v?.agents || []).map(({lastSeenAt: _seen, ...a}) => a)
+        });
+        return strip(this.vault) !== strip(this.savedVault);
+    }
+    reloadIfChanged() {
+        // Another writer replaced vault.enc. Load its copy, under the write lock, so this owner
+        // serves current data and its next write passes the disk-hash check. Refuse instead of
+        // discarding anything this process has not saved.
+        if (!this.changedOnDisk()) return false;
+        if (this.unsavedChanges()) throw new Error("The vault changed on disk while this process holds unsaved changes; refusing to reload over them");
+        let releaseWrite;
+        try {
+            releaseWrite = require("./session").claim(this.dataDir, "write.lock");
+            regularFile(this.vaultPath);
+            const stat = diskStat(this.vaultPath);
+            const bytes = fs.readFileSync(this.vaultPath, "utf8");
+            const raw = decryptVault(JSON.parse(bytes), this.password);
+            M.assertReadable(raw);
+            const seen = new Map((this.vault.agents || []).map(a => [ a.id, a.lastSeenAt ]));
+            const {vault: vault} = M.migrate(raw);
+            this.savedVault = clone(vault);
+            for (const a of vault.agents || []) if (seen.get(a.id)) a.lastSeenAt = seen.get(a.id);
+            this.vault = vault;
+            this.diskHash = createHash("sha256").update(bytes).digest("hex");
+            this.diskStat = stat;
+        } finally {
+            if (releaseWrite) releaseWrite();
+        }
+        return true;
     }
     persist() {
         if (!this.isUnlocked()) throw new Error("vault is locked");
@@ -191,16 +290,27 @@ class Store {
         try {
             releaseWrite = require("./session").claim(this.dataDir, "write.lock");
             const current = this.exists() ? createHash("sha256").update(fs.readFileSync(this.vaultPath)).digest("hex") : null;
-            if (current !== this.diskHash) throw new Error("Vault changed in another process; lock and unlock before retrying");
+            if (current !== this.diskHash) {
+                const stale = new Error("Vault changed in another process; nothing was saved. Retry once the newer copy is loaded");
+                stale.state = "STALE";
+                stale.status = 409;
+                throw stale;
+            }
             const bytes = JSON.stringify(encryptVault(this.vault, this.password));
             atomicWrite(this.vaultPath, bytes);
             this.diskHash = createHash("sha256").update(bytes).digest("hex");
+            this.diskStat = diskStat(this.vaultPath);
             this.savedVault = clone(this.vault);
         } catch (e) {
             this.vault = clone(this.savedVault);
             throw e;
         } finally {
             if (releaseWrite) releaseWrite();
+        }
+        for (const fn of this.persistListeners) {
+            try {
+                fn();
+            } catch {}
         }
     }
     contentFingerprint() {
@@ -687,6 +797,8 @@ class Store {
         return {
             hasExportPassword: !!this.vault.settings.exportPassword,
             rememberPassword: this.vault.settings.rememberPassword === true,
+            lockPolicy: this.vault.settings.lockPolicy === "soft" ? "soft" : "hard",
+            autoSync: this.autoSyncSettings(),
             keyring: this.keyring.describe(),
             formatVersion: this.vault.formatVersion
         };
@@ -694,9 +806,24 @@ class Store {
     setSettings(patch, actor = M.HUMAN) {
         if (actor !== M.HUMAN) throw new Error("Settings are human-only");
         V.object(patch);
-        if (Object.keys(patch).some(k => ![ "exportPassword", "rememberPassword" ].includes(k))) throw new Error("Unknown setting");
+        if (Object.keys(patch).some(k => ![ "exportPassword", "rememberPassword", "lockPolicy", "autoSync" ].includes(k))) throw new Error("Unknown setting");
         if (patch.exportPassword !== undefined && patch.exportPassword !== "") V.password(patch.exportPassword);
         if (patch.rememberPassword !== undefined && typeof patch.rememberPassword !== "boolean") throw new Error("Invalid remember setting");
+        if (patch.lockPolicy !== undefined && ![ "hard", "soft" ].includes(patch.lockPolicy)) throw new Error("Invalid lock policy");
+        if (patch.autoSync !== undefined) {
+            V.object(patch.autoSync);
+            const a = patch.autoSync;
+            if (Object.keys(a).some(k => ![ "enabled", "intervalSeconds" ].includes(k))) throw new Error("Unknown autosync setting");
+            if (a.enabled !== undefined && typeof a.enabled !== "boolean") throw new Error("Invalid autosync setting");
+            if (a.intervalSeconds !== undefined && (!Number.isInteger(a.intervalSeconds) || a.intervalSeconds < 30 || a.intervalSeconds > 86400)) throw new Error("Autosync interval must be 30 to 86400 seconds");
+            patch = {
+                ...patch,
+                autoSync: {
+                    ...this.autoSyncSettings(),
+                    ...a
+                }
+            };
+        }
         if (patch.rememberPassword === true) this.keyring.set(this.password);
         if (patch.rememberPassword === false) this.keyring.clear();
         const before = clone(this.vault.settings || {});
@@ -711,6 +838,13 @@ class Store {
         });
         this.persist();
         return this.getSettings();
+    }
+    autoSyncSettings() {
+        const a = this.vault.settings?.autoSync || {};
+        return {
+            enabled: a.enabled === true,
+            intervalSeconds: Number.isInteger(a.intervalSeconds) && a.intervalSeconds >= 30 && a.intervalSeconds <= 86400 ? a.intervalSeconds : AUTO_SYNC_DEFAULT_SECONDS
+        };
     }
     exportData(idOrName) {
         const p = this.findProject(idOrName);

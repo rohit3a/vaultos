@@ -14,6 +14,8 @@ const {startApi: startApi} = require("./api");
 
 const {requestShutdown: requestShutdown, claim: claim} = require("./session");
 
+const {AutoSync: AutoSync, syncRepo: syncRepo} = require("./autosync");
+
 const {safeEqual: safeEqual} = require("./crypto");
 
 const {defaultDataDir: defaultDataDir} = require("./paths");
@@ -37,7 +39,7 @@ protocol.registerSchemesAsPrivileged([ {
 
 const store = new Store;
 
-let win, api, release, humanUnlocked = false, timer, failed = 0, retryAt = 0;
+let win, api, autoSync, release, humanUnlocked = false, timer, failed = 0, retryAt = 0;
 
 const URL_HOME = "vaultos-preview://app/index.html";
 
@@ -56,6 +58,10 @@ function lock({forget: forget = true} = {}) {
             store.keyring.clear();
         } catch {}
     }
+    if (autoSync) {
+        autoSync.stop();
+        autoSync = null;
+    }
     if (api) {
         api.server.close();
         api.server.closeAllConnections();
@@ -70,9 +76,22 @@ function lock({forget: forget = true} = {}) {
     if (win && !win.isDestroyed()) win.webContents.send("vault:locked");
 }
 
+// Locks only the window: the human must unlock again to view or change anything, while
+// this process keeps owning the vault and serving enrolled agents.
+function lockWindow() {
+    humanUnlocked = false;
+    clearTimeout(timer);
+    if (win && !win.isDestroyed()) win.webContents.send("vault:locked");
+}
+
+// Screen lock, sleep and idle follow the vault's lock policy (hard unless the human chose soft).
+function autoLock(trigger) {
+    if (store.lockAction(trigger) === "ui") lockWindow(); else lock();
+}
+
 function touch() {
     clearTimeout(timer);
-    if (humanUnlocked) timer = setTimeout(() => lock(), 15 * 60 * 1e3);
+    if (humanUnlocked) timer = setTimeout(() => autoLock("idle"), 15 * 60 * 1e3);
 }
 
 async function own() {
@@ -83,8 +102,12 @@ async function own() {
 
 async function serve() {
     if (!api) {
-        api = await startApi(store);
+        autoSync = new AutoSync(store);
+        api = await startApi(store, {
+            autoSync: autoSync
+        });
         store.writeSession(api.port, api.token);
+        autoSync.start();
     }
 }
 
@@ -94,6 +117,7 @@ function handle(channel, fn, publicCall = false) {
         if (!publicCall && (!humanUnlocked || !store.isUnlocked())) throw new Error("Vault is locked");
         if (!publicCall) touch();
         try {
+            if (!publicCall) store.reloadIfChanged();
             return await fn(...args);
         } catch (e) {
             throw new Error(e instanceof SyntaxError ? "Invalid file format" : e.code ? "File operation failed; check permissions and retry" : e.message);
@@ -203,7 +227,11 @@ handle("copy", (project, key) => {
 
 handle("getSettings", () => store.getSettings());
 
-handle("setSettings", patch => store.setSettings(patch));
+handle("setSettings", patch => {
+    const result = store.setSettings(patch);
+    if (autoSync) autoSync.refresh();
+    return result;
+});
 
 handle("changePassword", (oldPw, newPw) => store.changePassword(oldPw, newPw));
 
@@ -270,16 +298,24 @@ handle("revert", id => store.revert(id));
 
 handle("audit", limit => store.readAudit(limit));
 
-const sync = () => new (require("./sync").Sync)(store, process.env.VAULTOS_SYNC_REPO || path.join(store.dataDir, "sync-repository"));
+const sync = () => new (require("./sync").Sync)(store, syncRepo(store));
 
-handle("syncStatus", () => sync().statusRemote());
+handle("syncStatus", () => ({
+    ...sync().statusRemote(),
+    autoSync: autoSync ? autoSync.status() : null
+}));
 
-handle("syncPush", () => sync().pushRemote());
+handle("syncPush", () => {
+    const r = sync().pushRemote();
+    if (autoSync && r.delivered) autoSync.clearHalt();
+    return r;
+});
 
 handle("syncPull", accept => {
     const r = sync().pullRemote({
         acceptConflicts: accept === true
     });
+    if (autoSync) autoSync.clearHalt();
     return {
         added: r.added.map(p => ({
             project: p.projectName,
@@ -383,8 +419,8 @@ if (!app.requestSingleInstanceLock()) app.quit(); else {
                 });
             }
         });
-        powerMonitor.on("lock-screen", () => lock());
-        powerMonitor.on("suspend", () => lock());
+        powerMonitor.on("lock-screen", () => autoLock("screen"));
+        powerMonitor.on("suspend", () => autoLock("suspend"));
         if (backendOnly) {
             if (app.dock) app.dock.hide();
             await own();

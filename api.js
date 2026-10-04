@@ -18,7 +18,7 @@ const V = require("./validation");
 
 const MAX_BODY = 1024 * 1024;
 
-function startApi(store, {onShutdown: onShutdown = null} = {}) {
+function startApi(store, {onShutdown: onShutdown = null, autoSync: autoSync = null} = {}) {
     const token = randomToken();
     const agents = new Agents(store);
     const server = http.createServer({
@@ -39,14 +39,18 @@ function startApi(store, {onShutdown: onShutdown = null} = {}) {
         if (!/^127\.0\.0\.1:\d+$/.test(req.headers.host || "")) return send(403, {
             error: "Invalid host"
         });
+        const owner = safeEqual(req.headers.authorization, `Bearer ${token}`);
         if (req.url === "/status" && req.method === "GET") return send(200, {
             app: "VaultOS-Preview",
             ok: true,
             locked: !store.isUnlocked(),
             formatVersion: M.FORMAT_VERSION,
-            deployment: deployment()
+            deployment: deployment(),
+            sync: autoSync ? owner ? autoSync.status() : autoSync.publicStatus() : {
+                state: "NOT_RUNNING"
+            }
         });
-        if (!safeEqual(req.headers.authorization, `Bearer ${token}`)) return send(401, {
+        if (!owner) return send(401, {
             error: "Unauthorized"
         });
         if (req.url === "/shutdown" && req.method === "POST" && onShutdown) {
@@ -56,9 +60,39 @@ function startApi(store, {onShutdown: onShutdown = null} = {}) {
             setTimeout(onShutdown, 10);
             return;
         }
+        // Owner control, like /shutdown: the session token alone, never an agent. It cannot
+        // accept conflicts or return values; it runs the same round autosync would.
+        if (req.url === "/sync" && req.method === "POST") {
+            if (req.headers["x-vault-agent-token"]) return send(403, {
+                error: "Agents cannot trigger sync"
+            });
+            if (!autoSync) return send(404, {
+                error: "Not found"
+            });
+            try {
+                const result = autoSync.run({
+                    manual: true
+                });
+                return send(200, {
+                    ok: result.state === "OK",
+                    ...result
+                });
+            } catch (e) {
+                return send(e.status || 409, {
+                    error: e.message
+                });
+            }
+        }
         if (!store.isUnlocked()) return send(423, {
             error: "Vault is locked. Unlock the app."
         });
+        try {
+            store.reloadIfChanged();
+        } catch {
+            return send(409, {
+                error: "The vault changed on disk and could not be reloaded. Unlock the app again."
+            });
+        }
         const agent = agents.authenticate(req.headers["x-vault-agent-token"]);
         if (!agent) return send(403, {
             error: "An enrolled, active agent token is required"

@@ -773,6 +773,21 @@ async function renderSettings() {
     remember.disabled = !s.keyring.secure;
     scroll.appendChild(rememberLabel);
     scroll.appendChild(el(`<p class="note">Off by default. Enabling this lets the backend unlock without your password entry. Lock clears the saved password; unlock again to re-enable it. This does not isolate secrets from software running as you.</p>`));
+    const softLabel = el(`<label class="note" style="display:flex;gap:10px;margin:16px 0"><input type="checkbox" style="width:auto" />Soft lock: screen lock, sleep and idle lock only this window</label>`);
+    const soft = softLabel.querySelector("input");
+    soft.checked = s.lockPolicy === "soft";
+    scroll.appendChild(softLabel);
+    scroll.appendChild(el(`<p class="note">Off by default. With soft lock, the vault stays decrypted in memory and enrolled agents keep working while your Mac is locked, asleep or idle; anyone or anything that can act as your account in that time can use their grants. The Lock button always stops the API and clears the remembered password.</p>`));
+    const autoLabel = el(`<label class="note" style="display:flex;gap:10px;margin:16px 0"><input type="checkbox" style="width:auto" />Sync automatically while unlocked</label>`);
+    const auto = autoLabel.querySelector("input");
+    auto.checked = s.autoSync.enabled;
+    scroll.appendChild(autoLabel);
+    const intervalField = fieldBlock("Autosync interval (seconds)");
+    const interval = el(`<input type="number" min="30" max="86400" step="1" />`);
+    interval.value = String(s.autoSync.intervalSeconds);
+    intervalField.appendChild(interval);
+    scroll.appendChild(intervalField);
+    scroll.appendChild(el(`<p class="note">Off by default. Uses Git sync configured on this device: pulls and pushes on this interval and a few seconds after each change. It stops and waits for you on conflicts or verification errors, and never accepts conflicts itself.</p>`));
     const err = el(`<div class="err"></div>`);
     const save = el(`<button class="btn">Save settings</button>`);
     save.onclick = async () => {
@@ -781,7 +796,12 @@ async function renderSettings() {
                 ...input.value ? {
                     exportPassword: input.value
                 } : {},
-                rememberPassword: remember.checked
+                rememberPassword: remember.checked,
+                lockPolicy: soft.checked ? "soft" : "hard",
+                autoSync: {
+                    enabled: auto.checked,
+                    intervalSeconds: Number(interval.value)
+                }
             });
         } catch (e) {
             err.textContent = e.message;
