@@ -18,9 +18,31 @@ Sync users additionally need the whole private preview data directory for their 
 
 Create a new private directory outside any existing installation. Copy your backed-up `vault.enc` there, set its mode to 0600, and use the source CLI with `VAULTOS_DATA_DIR=/absolute/new/recovery-directory node cli.cjs projects`. It prompts for a password without echo. Confirm the expected project names. The CLI does not print values; `inject` can deliberately export to a protected test folder when needed.
 
-The preview can read older supported encrypted envelopes and migrate their schema. Always perform this on a copy in a new directory first. It does not migrate prior apps' Keychain services, token files, install paths, launch agents, or sync repositories. Existing agent grants and sync identities deserve review; a fresh vault with deliberately entered credentials is the safest preview evaluation path.
+The preview can read older supported encrypted envelopes and migrate their schema. Always perform this on a copy in a new directory first. It does not migrate prior apps' Keychain services, token files, install paths, launch agents, or sync repositories (see [Importing from the earlier vault-os fork](#importing-from-the-earlier-vault-os-fork) for the one explicit import command). Existing agent grants and sync identities deserve review; a fresh vault with deliberately entered credentials is the safest preview evaluation path.
 
 For actual replacement, quit all processes owning that **preview** directory, preserve the current files elsewhere, then place the verified backup there. Unlock and review agent access. A restored vault may restore previously revoked agent tokens; reissue or revoke them before restarting integrations. Never replace a file while the vault is open.
+
+## Importing from the earlier vault-os fork
+
+If you used the earlier `vault-os` fork, you can import its data directory once, explicitly, into a **new, empty** preview data directory. Nothing does this automatically. Quit the earlier app and any background service it runs, and quit VaultOS Preview, then from a source checkout:
+
+```sh
+node cli.cjs import-legacy --from /absolute/path/to/earlier/vault-os --plan
+node cli.cjs import-legacy --from /absolute/path/to/earlier/vault-os
+```
+
+The earlier directory is `~/Library/Application Support/vault-os` on macOS and `~/.config/vault-os` (or `$XDG_CONFIG_HOME/vault-os`) on Linux. Set `VAULTOS_DATA_DIR` first to import somewhere other than the default preview directory.
+
+- `--plan` decrypts a temporary copy and prints counts, records that fail this build's validation (by project and key name and the rule, never values), name collisions, previously denied keys and history entries that cannot be undone here. It writes nothing.
+- The import refuses if the target already has a vault, if `--from` is the target, if either app is running, or if any record fails validation. Fix reported records in the earlier app and retry.
+- The vault is re-encrypted with this build's envelope and migrated to format v3. The earlier directory is only read; its plaintext password file (`backend.key`), session file, Keychain entries and sync state are never read or copied. Set up a new sync group afterwards with `sync init`.
+- Agents keep their token hashes, so existing agent tokens keep working, but they start with no project or folder access. Grant access in Settings → Agents or with `agents grant`, or pass `--grant-all-existing-agents` to give every non-revoked agent all-access grants.
+- A shared agent token file (`agent-token`, or `agents/NAME.token`) whose hash matches an enrolled agent is copied to `<data directory>/agents/NAME.token` (0600); set `VAULTOS_AGENT=NAME` for that agent's bridge. Tokens are never printed.
+- This build has no separate "denied" state: keys denied in the earlier app arrive held for approval. Deny (which removes them) or approve them in VaultOS.
+- `audit.log` is copied with an import entry appended, and `backups/*.enc` are copied unchanged. Those backups remain in the earlier envelope and password; this build can read them.
+- The PDF export password and approval relay hash carry over. `--lock-policy soft|hard` and `--auto-sync` set those options; background access stays off until you enable it in the app.
+
+To roll back, quit VaultOS Preview and remove the new preview data directory. The earlier data directory is unchanged.
 
 ## Password rotation
 
