@@ -24,6 +24,7 @@
     "check": "node scripts/check.mjs && npm test",
     "build:native": "node scripts/build-native.mjs",
     "dist:mac": "node scripts/package-mac.mjs",
+    "dist:linux": "node scripts/package-linux.mjs",
     "mcp": "node mcp/server.mjs"
   },
   "dependencies": {

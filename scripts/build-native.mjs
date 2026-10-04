@@ -2,7 +2,10 @@ import { mkdirSync } from "node:fs";
 
 import { execFileSync } from "node:child_process";
 
-if (process.platform !== "darwin") throw new Error("The Keychain helper must be built on macOS");
+if (process.platform !== "darwin") {
+    console.log(`No native helper is needed on ${process.platform}; Linux uses secret-tool (libsecret) at run time.`);
+    process.exit(0);
+}
 
 mkdirSync("build/native", {
     recursive: true
