@@ -18,6 +18,24 @@ const {atomicWrite: atomicWrite, regularFile: regularFile} = require("./fs-safe"
 
 const opaque = ref => crypto.createHash("sha256").update(ref, "utf8").digest("hex");
 
+// The desktop app, opened from the Dock or Finder, gets launchd's PATH (/usr/bin:/bin:/usr/sbin:/sbin),
+// not the shell's. age installed with Homebrew or into ~/.local/bin is then invisible to it, sync
+// fails with "age is not installed" and halts, while the same vault syncs from a terminal. So a tool
+// missing from PATH is also looked for where installers put it.
+const TOOL_DIRS = [ path.join(require("node:os").homedir(), ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin" ];
+
+function findTool(name, {pathEnv: pathEnv = process.env.PATH || "", extraDirs: extraDirs = TOOL_DIRS} = {}) {
+    if (process.platform === "win32") return name;
+    for (const dir of [ ...pathEnv.split(path.delimiter).filter(Boolean), ...extraDirs ]) {
+        const file = path.join(dir, name);
+        try {
+            fs.accessSync(file, fs.constants.X_OK);
+            if (fs.statSync(file).isFile()) return file;
+        } catch {}
+    }
+    return name;
+}
+
 class Sync {
     constructor(store, repoDir) {
         this.store = store;
@@ -214,7 +232,7 @@ class Sync {
         };
     }
     age(args, input) {
-        return execFileSync("age", args, {
+        return execFileSync(findTool("age"), args, {
             input: input,
             encoding: null,
             maxBuffer: 64 * 1024 * 1024,
@@ -224,7 +242,7 @@ class Sync {
     }
     requireAge() {
         try {
-            execFileSync("age", [ "--version" ], {
+            execFileSync(findTool("age"), [ "--version" ], {
                 stdio: "ignore"
             });
         } catch {
@@ -318,13 +336,13 @@ class Sync {
         this.requireAge();
         this.ensureDirs();
         if (!fs.existsSync(this.identityPath)) {
-            const out = execFileSync("age-keygen", [], {
+            const out = execFileSync(findTool("age-keygen"), [], {
                 encoding: "utf8",
                 stdio: [ "ignore", "pipe", "pipe" ]
             });
             atomicWrite(this.identityPath, out);
         }
-        const pub = execFileSync("age-keygen", [ "-y", this.identityPath ], {
+        const pub = execFileSync(findTool("age-keygen"), [ "-y", this.identityPath ], {
             encoding: "utf8"
         }).trim();
         regularFile(this.recipientsPath, {
@@ -885,5 +903,6 @@ class Sync {
 
 module.exports = {
     Sync: Sync,
-    opaque: opaque
+    opaque: opaque,
+    findTool: findTool
 };
