@@ -128,7 +128,9 @@ async function own() {
 
 async function serve() {
     if (!api) {
-        autoSync = new AutoSync(store);
+        autoSync = new AutoSync(store, {
+            log: m => console.error(`VaultOS Preview: ${m}`)
+        });
         api = await startApi(store, {
             autoSync: autoSync
         });

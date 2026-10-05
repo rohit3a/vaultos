@@ -119,6 +119,11 @@ class AutoSync {
         this.halted = true;
         this.clearTimers();
         this.log(`autosync halted (${state}): ${error}`);
+        // The desktop app has no log anyone reads, so a halt is also recorded in the vault's
+        // activity log. Otherwise sync can stop for good with nothing saying why.
+        try {
+            this.store.audit("sync_halted", `${state}: ${error}`, "autosync");
+        } catch {}
     }
     // One pull-then-push round. Git and age run synchronously, so nothing else in this
     // process (including another round or a vault write) interleaves with it.

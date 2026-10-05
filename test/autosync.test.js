@@ -248,6 +248,8 @@ test("autosync halts on a conflict, publishes nothing and leaves resolution to a
     await until(() => auto.status().halted);
     assert.equal(auto.status().state, "CONFLICTS_PENDING");
     assert.equal(auto.status().conflicts, 1);
+    // The halt and its reason are in the activity log, not only in a log nobody reads.
+    assert(a.readAudit().some(e => e.actor === "autosync" && e.action === "sync_halted" && e.detail.startsWith("CONFLICTS_PENDING")));
     assert.equal(auto.timer, null);
     const runs = auto.runs;
     await sleep(500);

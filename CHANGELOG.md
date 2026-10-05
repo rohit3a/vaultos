@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Sync: the desktop app finds `age` and `age-keygen` when they are not on its PATH. Opened from the Dock or Finder on macOS, the app gets launchd's PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), so `age` installed with Homebrew or into `~/.local/bin` was invisible: its first sync failed with "age is not installed" and autosync halted for good, while the same vault synced from a terminal or the background service. A tool missing from PATH is now also looked for in `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and `/home/linuxbrew/.linuxbrew/bin`.
+- Sync: when autosync halts, the reason is written to the vault's activity log (`sync_halted`, by `autosync`), and the desktop app also prints autosync messages to its console. Before, the desktop discarded them, so a halt left nothing saying why.
+
 ## 0.2.0-preview.1
 
 - `node cli.cjs import-legacy --from DIR [--plan]`: an explicit, one-time import of a data directory from the earlier vault-os fork into a new, empty preview data directory. It validates every record first, never modifies the source or copies its plaintext password file, keeps agent token hashes with deny-by-default access (or `--grant-all-existing-agents`), holds previously denied keys for approval, and maps a matching shared agent token to `agents/NAME.token`.

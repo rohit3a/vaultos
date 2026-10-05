@@ -4,7 +4,7 @@ const {test: test} = require("node:test"), assert = require("node:assert/strict"
 
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 
-const {Store: Store} = require("../store"), {Sync: Sync} = require("../sync");
+const {Store: Store} = require("../store"), {Sync: Sync, findTool: findTool} = require("../sync");
 
 function make(t) {
     const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "vaultos-sync-test-"));
@@ -254,4 +254,42 @@ test("Git transport verifies a real remote receipt and refuses unrelated files",
     fs.writeFileSync(path.join(repo, "unrelated.txt"), "must not publish");
     assert.throws(() => sa.pushRemote(), /unrelated/);
     assert(!git("--git-dir", remote, "ls-tree", "--name-only", "HEAD").toString().includes("unrelated"));
+});
+
+test("sync finds age where installers put it when PATH lacks it (the Dock's PATH on macOS)", {
+    skip: process.platform === "win32"
+}, t => {
+    const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "vaultos-findtool-test-"));
+    t.after(() => fs.rmSync(dir, {
+        recursive: true,
+        force: true
+    }));
+    // "system" stands in for launchd's /usr/bin:/bin:/usr/sbin:/sbin, which has no age on a Mac
+    // (the real /usr/bin may have one, as on CI runners).
+    const bin = path.join(dir, "bin"), system = path.join(dir, "system"), age = path.join(bin, "age");
+    fs.mkdirSync(bin);
+    fs.mkdirSync(system);
+    fs.writeFileSync(age, "#!/bin/sh\n", {
+        mode: 493
+    });
+    fs.writeFileSync(path.join(bin, "not-executable"), "", {
+        mode: 420
+    });
+    assert.equal(findTool("age", {
+        pathEnv: system,
+        extraDirs: [ bin ]
+    }), age);
+    assert.equal(findTool("age", {
+        pathEnv: bin,
+        extraDirs: []
+    }), age);
+    // Not found anywhere, or not executable: the bare name, so the usual "not installed" error follows.
+    assert.equal(findTool("age", {
+        pathEnv: "",
+        extraDirs: []
+    }), "age");
+    assert.equal(findTool("not-executable", {
+        pathEnv: "",
+        extraDirs: [ bin ]
+    }), "not-executable");
 });
