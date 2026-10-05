@@ -767,12 +767,15 @@ class Store {
     }
     pendingApprovals() {
         const out = [];
+        // Approval prompts name the agent, not its opaque agent:<id> reference.
+        const names = new Map((this.vault.agents || []).map(a => [ M.agentRef(a.id), a.name ]));
         for (const p of this.vault.projects || []) {
             for (const s of p.secrets || []) {
                 if (s.injectApproved === false) out.push({
                     project: p.name,
                     key: s.key,
                     owner: s.owner,
+                    ownerName: names.get(s.owner),
                     createdAt: s.createdAt
                 });
             }
