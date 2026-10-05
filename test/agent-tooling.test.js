@@ -202,6 +202,7 @@ test("import_env createProject creates only missing projects and checks the path
     assert.deepEqual(made.body.keys, [ "NEW_ONE" ]);
     assert(!JSON.stringify(made.body).includes("synthetic-import-value"));
     assert.equal(store.pendingApprovals()[0].key, "NEW_ONE");
+    assert.equal(store.pendingApprovals()[0].ownerName, "adder", "approval prompts name the agent");
     assert.equal((await call("/import", {
         project: "Missing",
         env_path: path.join(root, ".env")
