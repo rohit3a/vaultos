@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Sync: an edit made on one device now reaches the other as an ordinary update. Pull compares each record with the last synced version (the sync index) and its revision, and only reports a conflict when both devices changed it. Previously any difference was a conflict, which halted autosync on the other device after every edit or approval.
+
+## Unreleased
+
 - Sync: the desktop app finds `age` and `age-keygen` when they are not on its PATH. Opened from the Dock or Finder on macOS, the app gets launchd's PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), so `age` installed with Homebrew or into `~/.local/bin` was invisible: its first sync failed with "age is not installed" and autosync halted for good, while the same vault synced from a terminal or the background service. A tool missing from PATH is now also looked for in `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and `/home/linuxbrew/.linuxbrew/bin`.
 - Sync: when autosync halts, the reason is written to the vault's activity log (`sync_halted`, by `autosync`), and the desktop app also prints autosync messages to its console. Before, the desktop discarded them, so a halt left nothing saying why.
 

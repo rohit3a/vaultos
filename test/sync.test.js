@@ -112,6 +112,47 @@ test("sync refuses concurrent edits until explicitly accepted and preserves a ba
     assert(fs.readdirSync(path.join(a.dataDir, "backups")).length > 0);
 });
 
+test("an edit made on one device reaches the other as an update, not a conflict", t => {
+    const {a: a, b: b, sa: sa, sb: sb} = make(t);
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "base"
+    });
+    sa.push();
+    sb.pull();
+    // Edit on A only: B has not touched the record since its last sync.
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "edited-on-a"
+    });
+    sa.push();
+    const plan = sb.pull();
+    assert.equal(plan.conflicts.length, 0);
+    assert.equal(b.revealSecret("Example", "KEY").value, "edited-on-a");
+    // And back the other way, created and edited on B.
+    b.setSecret("Example", {
+        key: "FROM_B",
+        value: "one"
+    });
+    sb.push();
+    sa.pull();
+    b.setSecret("Example", {
+        key: "FROM_B",
+        value: "two"
+    });
+    sb.push();
+    assert.equal(sa.pull().conflicts.length, 0);
+    assert.equal(a.revealSecret("Example", "FROM_B").value, "two");
+    // A local edit with an unchanged remote stays local until the next push.
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "local-only"
+    });
+    assert.equal(sa.pull().conflicts.length, 0);
+    assert.equal(a.revealSecret("Example", "KEY").value, "local-only");
+});
+
 test("a pull that keeps a local edit leaves it for the next push instead of stranding it", t => {
     const {a: a, b: b, sa: sa, sb: sb} = make(t);
     a.createProject("Example");

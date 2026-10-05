@@ -635,6 +635,8 @@ class Sync {
             remoteTombs.set(r.payload.ref, r.payload);
         }
         const local = this.localRecords();
+        // What this device last knew the repository held, per record: the merge base.
+        const base = this.readIndex().records;
         const plan = {
             added: [],
             updated: [],
@@ -661,6 +663,17 @@ class Sync {
                 continue;
             }
             const lrev = lo.record.rev || 1, rrev = rp.record.rev || 1;
+            // Three-way check against the merge base: a record changed on one side only since
+            // the last sync is an ordinary update, not a conflict. The revision must agree too,
+            // so a damaged index can never let an older copy replace a newer local edit.
+            if (base[ref] && lo.hash === base[ref] && rrev > lrev) {
+                plan.updated.push(rp);
+                continue;
+            }
+            if (base[ref] && rp.hash === base[ref] && lrev > rrev) {
+                plan.unchanged++;
+                continue;
+            }
             const lts = Date.parse(lo.record.updatedAt || 0), rts = Date.parse(rp.record.updatedAt || 0);
             // Equal revision and timestamp must break the same way on every device, or each
             // keeps its own version and accepting conflicts never converges. Content hash decides.
