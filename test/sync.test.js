@@ -264,8 +264,11 @@ test("sync finds age where installers put it when PATH lacks it (the Dock's PATH
         recursive: true,
         force: true
     }));
-    const bin = path.join(dir, "bin"), age = path.join(bin, "age");
+    // "system" stands in for launchd's /usr/bin:/bin:/usr/sbin:/sbin, which has no age on a Mac
+    // (the real /usr/bin may have one, as on CI runners).
+    const bin = path.join(dir, "bin"), system = path.join(dir, "system"), age = path.join(bin, "age");
     fs.mkdirSync(bin);
+    fs.mkdirSync(system);
     fs.writeFileSync(age, "#!/bin/sh\n", {
         mode: 493
     });
@@ -273,7 +276,7 @@ test("sync finds age where installers put it when PATH lacks it (the Dock's PATH
         mode: 420
     });
     assert.equal(findTool("age", {
-        pathEnv: "/usr/bin:/bin:/usr/sbin:/sbin",
+        pathEnv: system,
         extraDirs: [ bin ]
     }), age);
     assert.equal(findTool("age", {
