@@ -90,13 +90,16 @@ class Sync {
         const commit = this.git.commitPaths([ "records", "tombstones", "machines", "manifests", "recipients.txt", "vaultos-sync.json" ], msg);
         this.publishHeartbeat();
         const heartbeatCommit = this.git.commitPaths([ "peers" ], `heartbeat: ${this.machineId()}`);
-        if (!heartbeatCommit.ok) throw new Error("Could not commit the sync receipt");
-        if (!commit.ok) {
+        // The next round commits whatever a failed commit left (commitLeftovers), so a failed
+        // commit is worth retrying rather than a reason to stop.
+        const failed = !commit.ok ? commit.error : !heartbeatCommit.ok ? `could not commit the sync receipt: ${heartbeatCommit.error}` : null;
+        if (failed) {
             return {
                 ...wrote,
                 transport: "commit-failed",
+                code: "COMMIT_FAILED",
                 delivered: false,
-                error: commit.error,
+                error: failed,
                 receipt: this.receipt()
             };
         }
@@ -137,6 +140,7 @@ class Sync {
                 warning: `${this.repo} is not a git repo; merged only what was already local`
             };
         }
+        this.commitLeftovers();
         const ff = this.git.pullFF();
         if (!ff.ok) {
             const e = new Error(`cannot update the sync repo: ${ff.error}`);
@@ -151,6 +155,29 @@ class Sync {
             fetched: ff.changed,
             receipt: this.receipt()
         };
+    }
+    // A round that stops between writing its files and committing them (a failed commit, a
+    // crash) leaves them in the working tree, and Git will not rebase onto a peer's commits
+    // until they are committed or stashed. They are this machine's own output, regenerated and
+    // signed by every push, so the next round commits them before it fetches, provided the
+    // checkout still verifies. If anything else changed, nothing is committed or discarded.
+    commitLeftovers() {
+        const changed = this.git.changedPaths();
+        if (!changed.ok || !changed.files.length) return null;
+        const id = this.machineId();
+        const own = f => f === `manifests/${id}.json` || f === `peers/${id}.json` || /^(?:records|tombstones)\/[a-f0-9]{64}\.age$/.test(f);
+        if (!changed.files.every(own)) return null;
+        // Checked, not remembered: if this round then halts and a human drops the commit, the
+        // older manifest must not read as a rollback.
+        if (this.verifyManifests({
+            remember: false
+        }).problems.length) return null;
+        const c = this.git.commitPaths(changed.files, `vault sync: ${changed.files.length} file(s) left uncommitted by an earlier round from ${id}`);
+        if (!c.ok) throw Object.assign(new Error(`cannot commit what an earlier round left: ${c.error}`), {
+            code: "COMMIT_FAILED",
+            status: 409
+        });
+        return c;
     }
     statusRemote() {
         const base = this.status();
@@ -518,7 +545,7 @@ class Sync {
         const recipients = fs.readFileSync(this.recipientsPath, "utf8").split("\n").map(x => x.trim()).filter(x => x && !x.startsWith("#"));
         if (!recipients.length || recipients.some(x => !approved.has(x))) throw new Error("Unapproved encryption recipient; verify and trust the peer first");
     }
-    verifyManifests() {
+    verifyManifests({remember: remember = true} = {}) {
         const idx = this.readIndex(), problems = [], accepted = [];
         const trusted = this.store.vault.syncTrust || {};
         const present = new Set;
@@ -581,7 +608,7 @@ class Sync {
             const tomb = "tombstones/" + path.basename(name);
             if (!name.startsWith("records/") || !fs.existsSync(path.join(this.repo, tomb))) problems.push("Signed ciphertext is missing");
         }
-        if (!problems.length) {
+        if (!problems.length && remember) {
             for (const {id: id, m: m, hash: hash} of accepted) idx.seenManifests[id] = {
                 counter: m.counter,
                 hash: hash,

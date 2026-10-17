@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Sync: one failed commit no longer stops a device syncing. The failed round left this device's manifest uncommitted under a heartbeat commit it never pushed, Git then refused every rebase onto the other device's commits ("cannot rebase: You have unstaged changes"), and each round halted as `GIT_HISTORY_DIVERGED` until the file was stashed by hand. Before it fetches, a round now commits files an earlier round wrote but did not commit (ciphertext, and this device's own manifest and heartbeat), provided the checkout still verifies. A failed commit unstages its paths, reports Git's own error instead of "Unrelated staged files" (which it also said when its own `git diff` failed), and is retried on the next round as `COMMIT_FAILED` instead of halting. Uncommitted changes that block a rebase are reported as `LOCAL_SYNC_REPO_DIRTY`, not as diverged history. Conflicting records, signature, replay and unreadable-record errors still halt.
 - Sync: an edit made on one device now reaches the other as an ordinary update. Pull compares each record with the last synced version (the sync index) and its revision, and only reports a conflict when both devices changed it. Previously any difference was a conflict, which halted autosync on the other device after every edit or approval.
 
 ## Unreleased

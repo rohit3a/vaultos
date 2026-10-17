@@ -334,3 +334,209 @@ test("a peer whose signed heartbeat is older than 48 hours is reported as stalle
     assert.equal(auto.publicStatus().peerStalled, true);
     assert.equal(auto.publicStatus().error, undefined);
 });
+
+// What a round that stopped between writing and committing leaves behind: ciphertext and this
+// machine's manifest written but never committed, and a heartbeat committed but never pushed.
+function leaveRoundUncommitted(sync) {
+    sync.push();
+    sync.publishHeartbeat();
+    assert(sync.git.commitPaths([ "peers" ], `heartbeat: ${sync.machineId()}`).committed);
+}
+
+function autosyncFor(store, repo) {
+    store.setSettings({
+        autoSync: {
+            enabled: true
+        }
+    });
+    return new AutoSync(store, {
+        repo: repo
+    });
+}
+
+test("a round commits what an earlier round left uncommitted, so it can rebase onto the peer", t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, git: git} = gitPair(t);
+    a.createProject("Shared");
+    a.setSecret("Shared", {
+        key: "FROM_A",
+        value: "synthetic-a"
+    });
+    leaveRoundUncommitted(sa);
+    b.createProject("Other");
+    b.setSecret("Other", {
+        key: "FROM_B",
+        value: "synthetic-b"
+    });
+    assert(sb.pushRemote().delivered);
+    assert.match(git("-C", repoA, "status", "--porcelain"), new RegExp(`manifests/${sa.machineId()}\\.json`));
+    // Git will not rebase over the uncommitted manifest; this halted every later round.
+    assert.equal(sa.git.pullFF().code, "LOCAL_SYNC_REPO_DIRTY");
+    const round = autosyncFor(a, repoA).run();
+    assert.equal(round.state, "OK", round.error);
+    assert.equal(round.halted, false);
+    assert.equal(git("-C", repoA, "status", "--porcelain"), "");
+    assert.equal(a.revealSecret("Other", "FROM_B").value, "synthetic-b");
+    sb.pullRemote();
+    assert.equal(b.revealSecret("Shared", "FROM_A").value, "synthetic-a");
+    assert.equal(sa.statusRemote().state, "IN_SYNC");
+});
+
+test("a commit refused over another staged file is retried, and the next round delivers", t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, git: git} = gitPair(t);
+    a.createProject("Shared");
+    a.setSecret("Shared", {
+        key: "FROM_A",
+        value: "synthetic-a"
+    });
+    sa.pullRemote();
+    // This machine's heartbeat is staged when the round comes to commit its records.
+    sa.publishHeartbeat();
+    git("-C", repoA, "add", "--", `peers/${sa.machineId()}.json`);
+    const refused = sa.pushRemote();
+    assert.equal(refused.delivered, false);
+    assert.equal(refused.code, "COMMIT_FAILED");
+    assert.match(refused.error, /^Unrelated staged files; refusing to commit: peers\//);
+    // The heartbeat commit still went ahead, leaving the manifest uncommitted on top of it.
+    assert.match(git("-C", repoA, "status", "--porcelain"), /manifests\//);
+    assert.equal(git("-C", repoA, "diff", "--cached", "--name-only"), "");
+    b.createProject("Other");
+    b.setSecret("Other", {
+        key: "FROM_B",
+        value: "synthetic-b"
+    });
+    assert(sb.pushRemote().delivered);
+    const round = autosyncFor(a, repoA).run();
+    assert.equal(round.state, "OK", round.error);
+    assert.equal(git("-C", repoA, "status", "--porcelain"), "");
+    sb.pullRemote();
+    assert.equal(b.revealSecret("Shared", "FROM_A").value, "synthetic-a");
+});
+
+test("a failed commit unstages what it staged, and autosync retries instead of halting", t => {
+    const {a: a, b: b, sb: sb, repoA: repoA, git: git} = gitPair(t);
+    a.createProject("Shared");
+    a.setSecret("Shared", {
+        key: "FROM_A",
+        value: "synthetic-a"
+    });
+    // Another Git process holding the branch lock makes `git commit` fail after `git add`.
+    const lock = path.join(repoA, ".git", "refs", "heads", "main.lock");
+    fs.writeFileSync(lock, "");
+    const auto = autosyncFor(a, repoA);
+    const failed = auto.run();
+    assert.equal(failed.state, "PUSH_NOT_DELIVERED");
+    assert.equal(failed.halted, false);
+    assert.match(failed.error, /main\.lock/);
+    assert.equal(git("-C", repoA, "diff", "--cached", "--name-only"), "");
+    assert.match(git("-C", repoA, "status", "--porcelain"), /records\//);
+    assert(!a.readAudit().some(e => e.action === "sync_halted"));
+    fs.unlinkSync(lock);
+    b.createProject("Other");
+    b.setSecret("Other", {
+        key: "FROM_B",
+        value: "synthetic-b"
+    });
+    assert(sb.pushRemote().delivered);
+    const round = auto.run();
+    assert.equal(round.state, "OK", round.error);
+    assert.equal(git("-C", repoA, "status", "--porcelain"), "");
+    sb.pullRemote();
+    assert.equal(b.revealSecret("Shared", "FROM_A").value, "synthetic-a");
+});
+
+test("a round still halts when both machines changed the same record, and discards neither", t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, remote: remote, git: git} = gitPair(t);
+    a.createProject("Shared");
+    a.setSecret("Shared", {
+        key: "KEY",
+        value: "synthetic-base"
+    });
+    assert(sa.pushRemote().delivered);
+    sb.pullRemote();
+    a.setSecret("Shared", {
+        key: "KEY",
+        value: "synthetic-from-a"
+    });
+    leaveRoundUncommitted(sa);
+    b.setSecret("Shared", {
+        key: "KEY",
+        value: "synthetic-from-b"
+    });
+    assert(sb.pushRemote().delivered);
+    const remoteHead = git("--git-dir", remote, "rev-parse", "main");
+    const round = autosyncFor(a, repoA).run();
+    assert.equal(round.state, "GIT_HISTORY_DIVERGED");
+    assert.equal(round.halted, true);
+    assert(a.readAudit().some(e => e.actor === "autosync" && e.action === "sync_halted" && e.detail.startsWith("GIT_HISTORY_DIVERGED")));
+    assert.equal(git("--git-dir", remote, "rev-parse", "main"), remoteHead);
+    // A's ciphertext is now a local commit rather than loose files; nothing was thrown away.
+    assert.equal(git("-C", repoA, "status", "--porcelain"), "");
+    assert.match(git("-C", repoA, "log", "-1", "--format=%s"), /left uncommitted by an earlier round/);
+    assert.equal(a.revealSecret("Shared", "KEY").value, "synthetic-from-a");
+});
+
+test("leftovers that fail verification stay uncommitted, and the round halts", t => {
+    const {a: a, sa: sa, repoA: repoA, remote: remote, git: git} = gitPair(t);
+    a.createProject("Shared");
+    a.setSecret("Shared", {
+        key: "FROM_A",
+        value: "synthetic-a"
+    });
+    leaveRoundUncommitted(sa);
+    const record = fs.readdirSync(path.join(repoA, "records"))[0];
+    fs.writeFileSync(path.join(repoA, "records", record), "tampered");
+    const before = git("-C", repoA, "status", "--porcelain"), remoteHead = git("--git-dir", remote, "rev-parse", "main");
+    const round = autosyncFor(a, repoA).run();
+    assert.equal(round.halted, true);
+    assert.match(round.error, /refusing to pull/);
+    assert.equal(git("-C", repoA, "status", "--porcelain"), before);
+    assert.equal(fs.readFileSync(path.join(repoA, "records", record), "utf8"), "tampered");
+    assert.equal(git("--git-dir", remote, "rev-parse", "main"), remoteHead);
+});
+
+test("leftovers do not carry a round past tampered ciphertext from a peer", t => {
+    const {a: a, sa: sa, sb: sb, repoA: repoA, repoB: repoB, remote: remote, git: git} = gitPair(t);
+    a.createProject("Shared");
+    a.setSecret("Shared", {
+        key: "FROM_A",
+        value: "synthetic-a"
+    });
+    assert(sa.pushRemote().delivered);
+    sb.pullRemote();
+    const record = fs.readdirSync(path.join(repoB, "records"))[0];
+    fs.writeFileSync(path.join(repoB, "records", record), "tampered");
+    git("-C", repoB, "commit", "--quiet", "-am", "tamper");
+    git("-C", repoB, "push", "--quiet", "origin", "HEAD:main");
+    leaveRoundUncommitted(sa);
+    const remoteHead = git("--git-dir", remote, "rev-parse", "main");
+    const round = autosyncFor(a, repoA).run();
+    assert.equal(round.halted, true);
+    assert.match(round.error, /refusing to pull/);
+    assert.equal(git("--git-dir", remote, "rev-parse", "main"), remoteHead);
+    assert.equal(a.revealSecret("Shared", "FROM_A").value, "synthetic-a");
+});
+
+test("leftovers do not carry a round past records this machine cannot decrypt", t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, repoB: repoB, remote: remote, git: git} = gitPair(t);
+    a.createProject("Shared");
+    a.setSecret("Shared", {
+        key: "FROM_A",
+        value: "synthetic-a"
+    });
+    assert(sa.pushRemote().delivered);
+    sb.pullRemote();
+    // B re-encrypts every record for itself alone.
+    fs.writeFileSync(path.join(repoB, "recipients.txt"), `# Machine B\n${sb.identity().agePublicKey}\n`);
+    b.setSecret("Shared", {
+        key: "FROM_B",
+        value: "synthetic-b"
+    });
+    assert(sb.pushRemote().delivered);
+    leaveRoundUncommitted(sa);
+    const remoteHead = git("--git-dir", remote, "rev-parse", "main");
+    const round = autosyncFor(a, repoA).run();
+    assert.equal(round.state, "UNREADABLE_RECORDS");
+    assert.equal(round.halted, true);
+    assert.equal(git("--git-dir", remote, "rev-parse", "main"), remoteHead);
+    assert.throws(() => a.revealSecret("Shared", "FROM_B"));
+});

@@ -15,8 +15,9 @@ const DEBOUNCE_MS = 5e3;
 
 const START_DELAY_MS = 1500;
 
-// Network trouble is retried on the next round. Every other failure needs a human.
-const TRANSIENT = new Set([ "REMOTE_UNREACHABLE", "PUSH_REJECTED", "RECEIPT_UNVERIFIED" ]);
+// Network trouble is retried on the next round, and so is a failed local commit: the next
+// round first commits what it left (Sync.commitLeftovers). Every other failure needs a human.
+const TRANSIENT = new Set([ "REMOTE_UNREACHABLE", "PUSH_REJECTED", "RECEIPT_UNVERIFIED", "COMMIT_FAILED" ]);
 
 const IDLE = new Set([ "STOPPED", "SCHEDULED", "DISABLED", "PAUSED_LOCKED", "NOT_CONFIGURED" ]);
 

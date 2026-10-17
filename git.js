@@ -67,6 +67,19 @@ class GitRepo {
             files: files
         };
     }
+    // Each path that differs from HEAD, staged or not, as a plain repository path. Unlike
+    // dirty(), files in an untracked directory are listed one by one.
+    changedPaths() {
+        const r = git(this.dir, [ "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all" ]);
+        if (!r.ok) return {
+            ok: false,
+            error: r.error
+        };
+        return {
+            ok: true,
+            files: r.out.split("\0").filter(Boolean).map(entry => entry.slice(3))
+        };
+    }
     fetch() {
         const remote = this.remoteName();
         if (!remote) return {
@@ -114,30 +127,35 @@ class GitRepo {
     }
     commitPaths(paths, message) {
         const pre = git(this.dir, [ "diff", "--cached", "--name-only" ]);
-        if (!pre.ok || pre.out.split("\n").filter(Boolean).some(f => !paths.some(p => f === p || f.startsWith(p + "/")))) return {
+        if (!pre.ok) return {
             ok: false,
-            error: "Unrelated staged files; refusing to commit"
+            error: pre.error
+        };
+        const unrelated = pre.out.split("\n").filter(f => f && !paths.some(p => f === p || f.startsWith(p + "/")));
+        if (unrelated.length) return {
+            ok: false,
+            error: `Unrelated staged files; refusing to commit: ${unrelated.slice(0, 3).join(", ")}`
+        };
+        // A failure after `git add` unstages the paths again. Left staged, they made the next
+        // commit of other paths refuse, and Git does not rebase over staged changes.
+        const fail = error => {
+            git(this.dir, [ "reset", "--quiet", "--", ...paths ]);
+            return {
+                ok: false,
+                error: error
+            };
         };
         const add = git(this.dir, [ "add", "--", ...paths ]);
-        if (!add.ok) return {
-            ok: false,
-            error: add.error
-        };
+        if (!add.ok) return fail(add.error);
         const staged = git(this.dir, [ "diff", "--cached", "--name-only" ]);
-        if (!staged.ok) return {
-            ok: false,
-            error: staged.error
-        };
+        if (!staged.ok) return fail(staged.error);
         if (!staged.out) return {
             ok: true,
             committed: false,
             sha: this.head()
         };
         const c = git(this.dir, [ "commit", "-m", message ]);
-        if (!c.ok) return {
-            ok: false,
-            error: c.error
-        };
+        if (!c.ok) return fail(c.error);
         return {
             ok: true,
             committed: true,
@@ -146,6 +164,14 @@ class GitRepo {
     }
     rebaseOnRemote() {
         const branch = this.branch(), remote = this.remoteName();
+        // Git refuses to rebase over uncommitted changes to tracked files. That is a dirty
+        // checkout, not diverged history, and is reported as one.
+        const tracked = git(this.dir, [ "status", "--porcelain=v1", "--untracked-files=no" ]);
+        if (tracked.ok && tracked.out) return {
+            ok: false,
+            code: "LOCAL_SYNC_REPO_DIRTY",
+            error: `uncommitted changes block the rebase: ${tracked.out.split("\n").slice(0, 3).map(f => f.slice(3)).join(", ")}`
+        };
         const r = git(this.dir, [ "rebase", `${remote}/${branch}` ]);
         if (r.ok) return {
             ok: true
@@ -214,7 +240,7 @@ class GitRepo {
             const rb = this.rebaseOnRemote();
             if (!rb.ok) return {
                 ok: false,
-                code: "GIT_HISTORY_DIVERGED",
+                code: rb.code,
                 error: rb.error
             };
             return {
