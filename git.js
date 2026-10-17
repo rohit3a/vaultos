@@ -6,9 +6,11 @@ const fs = require("node:fs");
 
 const path = require("node:path");
 
+// Every path VaultOS hands Git is a file or folder name, never a pattern. Without
+// --literal-pathspecs a stray file named `records/*` would match every record.
 function git(repo, args, {timeout: timeout = 6e4} = {}) {
     try {
-        const stdout = execFileSync("git", [ "-c", "core.hooksPath=/dev/null", "-C", repo, ...args ], {
+        const stdout = execFileSync("git", [ "--literal-pathspecs", "-c", "core.hooksPath=/dev/null", "-C", repo, ...args ], {
             encoding: "utf8",
             timeout: timeout,
             stdio: [ "ignore", "pipe", "pipe" ],
@@ -54,17 +56,29 @@ class GitRepo {
         const r = git(this.dir, [ "rev-parse", "HEAD" ]);
         return r.ok ? r.out : null;
     }
-    dirty() {
-        const r = git(this.dir, [ "status", "--porcelain" ]);
+    // The files under these paths that Git tracks, committed or staged.
+    trackedPaths(paths) {
+        const r = git(this.dir, [ "ls-files", "-z", "--", ...paths ]);
         if (!r.ok) return {
             ok: false,
             error: r.error
         };
-        const files = r.out ? r.out.split("\n").filter(Boolean) : [];
         return {
             ok: true,
-            dirty: files.length > 0,
-            files: files
+            files: new Set(r.out.split("\0").filter(Boolean))
+        };
+    }
+    // Each path that differs from HEAD, staged or not, as a plain repository path. Files in an
+    // untracked directory are listed one by one.
+    changedPaths() {
+        const r = git(this.dir, [ "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all" ]);
+        if (!r.ok) return {
+            ok: false,
+            error: r.error
+        };
+        return {
+            ok: true,
+            files: r.out.split("\0").filter(Boolean).map(entry => entry.slice(3))
         };
     }
     fetch() {
@@ -112,32 +126,52 @@ class GitRepo {
         const r = git(this.dir, [ "rev-parse", `${remote}/${branch}` ]);
         return r.ok ? r.out : null;
     }
-    commitPaths(paths, message) {
+    // Commits `paths` as they are in the working tree, and removes `untrack` from the
+    // repository while leaving those files on disk.
+    commitPaths(paths, message, {untrack: untrack = []} = {}) {
+        const all = [ ...paths, ...untrack ];
+        // With no paths, `git add --` adds nothing but `git reset --` would unstage everything.
+        if (!all.length) return {
+            ok: true,
+            committed: false,
+            sha: this.head()
+        };
         const pre = git(this.dir, [ "diff", "--cached", "--name-only" ]);
-        if (!pre.ok || pre.out.split("\n").filter(Boolean).some(f => !paths.some(p => f === p || f.startsWith(p + "/")))) return {
+        if (!pre.ok) return {
             ok: false,
-            error: "Unrelated staged files; refusing to commit"
+            error: pre.error
         };
-        const add = git(this.dir, [ "add", "--", ...paths ]);
-        if (!add.ok) return {
+        const unrelated = pre.out.split("\n").filter(f => f && !all.some(p => f === p || f.startsWith(p + "/")));
+        if (unrelated.length) return {
             ok: false,
-            error: add.error
+            error: `Unrelated staged files; refusing to commit: ${unrelated.slice(0, 3).join(", ")}`
         };
+        // A failure after `git add` unstages the paths again. Left staged, they made the next
+        // commit of other paths refuse, and Git does not rebase over staged changes.
+        const fail = error => {
+            git(this.dir, [ "reset", "--quiet", "--", ...all ]);
+            return {
+                ok: false,
+                error: error
+            };
+        };
+        const add = paths.length ? git(this.dir, [ "add", "--", ...paths ]) : {
+            ok: true
+        };
+        if (!add.ok) return fail(add.error);
+        const rm = untrack.length ? git(this.dir, [ "rm", "--cached", "--quiet", "--ignore-unmatch", "-r", "--", ...untrack ]) : {
+            ok: true
+        };
+        if (!rm.ok) return fail(rm.error);
         const staged = git(this.dir, [ "diff", "--cached", "--name-only" ]);
-        if (!staged.ok) return {
-            ok: false,
-            error: staged.error
-        };
+        if (!staged.ok) return fail(staged.error);
         if (!staged.out) return {
             ok: true,
             committed: false,
             sha: this.head()
         };
         const c = git(this.dir, [ "commit", "-m", message ]);
-        if (!c.ok) return {
-            ok: false,
-            error: c.error
-        };
+        if (!c.ok) return fail(c.error);
         return {
             ok: true,
             committed: true,
@@ -146,6 +180,14 @@ class GitRepo {
     }
     rebaseOnRemote() {
         const branch = this.branch(), remote = this.remoteName();
+        // Git refuses to rebase over uncommitted changes to tracked files. That is a dirty
+        // checkout, not diverged history, and is reported as one.
+        const tracked = git(this.dir, [ "status", "--porcelain=v1", "--untracked-files=no" ]);
+        if (tracked.ok && tracked.out) return {
+            ok: false,
+            code: "LOCAL_SYNC_REPO_DIRTY",
+            error: `uncommitted changes block the rebase: ${tracked.out.split("\n").slice(0, 3).map(f => f.slice(3)).join(", ")}`
+        };
         const r = git(this.dir, [ "rebase", `${remote}/${branch}` ]);
         if (r.ok) return {
             ok: true
@@ -214,7 +256,7 @@ class GitRepo {
             const rb = this.rebaseOnRemote();
             if (!rb.ok) return {
                 ok: false,
-                code: "GIT_HISTORY_DIVERGED",
+                code: rb.code,
                 error: rb.error
             };
             return {
