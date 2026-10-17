@@ -444,6 +444,36 @@ test("a failed commit unstages what it staged, and autosync retries instead of h
     assert.equal(b.revealSecret("Shared", "FROM_A").value, "synthetic-a");
 });
 
+test("a commit that keeps failing halts after three rounds, with Git's reason in the activity log", t => {
+    const {a: a, repoA: repoA, git: git} = gitPair(t);
+    a.createProject("Shared");
+    a.setSecret("Shared", {
+        key: "FROM_A",
+        value: "synthetic-a"
+    });
+    // Left by a Git process that crashed: every add and commit fails until someone removes it.
+    const lock = path.join(repoA, ".git", "index.lock");
+    fs.writeFileSync(lock, "");
+    const auto = autosyncFor(a, repoA);
+    for (const round of [ 1, 2 ]) {
+        const failed = auto.run();
+        assert.equal(failed.halted, false, `round ${round}`);
+        assert.match(failed.error, /index\.lock/);
+    }
+    const halted = auto.run();
+    assert.equal(halted.halted, true);
+    assert.equal(halted.state, "COMMIT_FAILED");
+    assert(a.readAudit().some(e => e.actor === "autosync" && e.action === "sync_halted" && /^COMMIT_FAILED: .*index\.lock/.test(e.detail)));
+    assert.equal(auto.run().lastAttemptAt, halted.lastAttemptAt);
+    fs.unlinkSync(lock);
+    const round = auto.run({
+        manual: true
+    });
+    assert.equal(round.state, "OK", round.error);
+    assert.equal(round.halted, false);
+    assert.equal(git("-C", repoA, "status", "--porcelain"), "");
+});
+
 test("a round still halts when both machines changed the same record, and discards neither", t => {
     const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, remote: remote, git: git} = gitPair(t);
     a.createProject("Shared");
@@ -476,7 +506,7 @@ test("a round still halts when both machines changed the same record, and discar
 });
 
 test("leftovers that fail verification stay uncommitted, and the round halts", t => {
-    const {a: a, sa: sa, repoA: repoA, remote: remote, git: git} = gitPair(t);
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, remote: remote, git: git} = gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "FROM_A",
@@ -485,6 +515,13 @@ test("leftovers that fail verification stay uncommitted, and the round halts", t
     leaveRoundUncommitted(sa);
     const record = fs.readdirSync(path.join(repoA, "records"))[0];
     fs.writeFileSync(path.join(repoA, "records", record), "tampered");
+    // The peer moves on too, so the halt must give the verification failure, not the rebase.
+    b.createProject("Other");
+    b.setSecret("Other", {
+        key: "FROM_B",
+        value: "synthetic-b"
+    });
+    assert(sb.pushRemote().delivered);
     const before = git("-C", repoA, "status", "--porcelain"), remoteHead = git("--git-dir", remote, "rev-parse", "main");
     const round = autosyncFor(a, repoA).run();
     assert.equal(round.halted, true);

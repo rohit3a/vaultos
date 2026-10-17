@@ -159,8 +159,9 @@ class Sync {
     // A round that stops between writing its files and committing them (a failed commit, a
     // crash) leaves them in the working tree, and Git will not rebase onto a peer's commits
     // until they are committed or stashed. They are this machine's own output, regenerated and
-    // signed by every push, so the next round commits them before it fetches, provided the
-    // checkout still verifies. If anything else changed, nothing is committed or discarded.
+    // signed by every push, so the next round commits them before it fetches. If anything else
+    // changed, nothing is committed or discarded; leftovers that do not verify stay as they are
+    // and stop the round for the reason a pull would give.
     commitLeftovers() {
         const changed = this.git.changedPaths();
         if (!changed.ok || !changed.files.length) return null;
@@ -169,9 +170,12 @@ class Sync {
         if (!changed.files.every(own)) return null;
         // Checked, not remembered: if this round then halts and a human drops the commit, the
         // older manifest must not read as a rollback.
-        if (this.verifyManifests({
+        const ver = this.verifyManifests({
             remember: false
-        }).problems.length) return null;
+        });
+        if (ver.problems.length) throw Object.assign(new Error(`refusing to pull:\n  ${ver.problems.join("\n  ")}`), {
+            status: 409
+        });
         const c = this.git.commitPaths(changed.files, `vault sync: ${changed.files.length} file(s) left uncommitted by an earlier round from ${id}`);
         if (!c.ok) throw Object.assign(new Error(`cannot commit what an earlier round left: ${c.error}`), {
             code: "COMMIT_FAILED",

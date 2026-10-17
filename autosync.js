@@ -15,9 +15,13 @@ const DEBOUNCE_MS = 5e3;
 
 const START_DELAY_MS = 1500;
 
-// Network trouble is retried on the next round, and so is a failed local commit: the next
-// round first commits what it left (Sync.commitLeftovers). Every other failure needs a human.
-const TRANSIENT = new Set([ "REMOTE_UNREACHABLE", "PUSH_REJECTED", "RECEIPT_UNVERIFIED", "COMMIT_FAILED" ]);
+// Network trouble is retried on the next round. Every other failure needs a human.
+const TRANSIENT = new Set([ "REMOTE_UNREACHABLE", "PUSH_REJECTED", "RECEIPT_UNVERIFIED" ]);
+
+// A failed local commit is retried as well, because the next round first commits what it left
+// (Sync.commitLeftovers). One that fails this many rounds running (a stale index.lock, no Git
+// identity) is not going away, and halts like any other failure.
+const COMMIT_ATTEMPTS = 3;
 
 const IDLE = new Set([ "STOPPED", "SCHEDULED", "DISABLED", "PAUSED_LOCKED", "NOT_CONFIGURED" ]);
 
@@ -39,6 +43,7 @@ class AutoSync {
         this.started = false;
         this.running = false;
         this.halted = false;
+        this.commitFailures = 0;
         this.state = {
             state: "STOPPED",
             lastSyncAt: null,
@@ -103,6 +108,7 @@ class AutoSync {
     }
     clearHalt() {
         this.halted = false;
+        this.commitFailures = 0;
         return this.refresh();
     }
     clearTimers() {
@@ -125,6 +131,12 @@ class AutoSync {
         try {
             this.store.audit("sync_halted", `${state}: ${error}`, "autosync");
         } catch {}
+    }
+    // Whether the next round should try again after this one failed with `code` (null if it
+    // did not fail). Counts failed commits in a row.
+    retry(code) {
+        this.commitFailures = code === "COMMIT_FAILED" ? this.commitFailures + 1 : 0;
+        return TRANSIENT.has(code) || code === "COMMIT_FAILED" && this.commitFailures < COMMIT_ATTEMPTS;
     }
     // One pull-then-push round. Git and age run synchronously, so nothing else in this
     // process (including another round or a vault write) interleaves with it.
@@ -152,6 +164,7 @@ class AutoSync {
             });
             const problems = sync.peerProblems();
             const failure = pushed.delivered ? null : pushed.code || pushed.transport || "PUSH_NOT_DELIVERED";
+            const retried = this.retry(failure);
             this.state = {
                 state: pushed.delivered ? "OK" : "PUSH_NOT_DELIVERED",
                 lastSyncAt: pushed.delivered ? attemptAt : this.state.lastSyncAt,
@@ -167,7 +180,7 @@ class AutoSync {
                 peerProblems: problems
             };
             if (manual) this.halted = false;
-            if (failure && !TRANSIENT.has(failure)) this.halt(failure, this.state.error); else if (manual && wasHalted) this.refresh();
+            if (failure && !retried) this.halt(failure, this.state.error); else if (manual && wasHalted) this.refresh();
             if (pulled.added.length || pulled.updated.length || pulled.deleted.length || pushed.written) this.log(`synced: +${pulled.added.length} ~${pulled.updated.length} -${pulled.deleted.length} in, ${pushed.written || 0} out`);
         } catch (e) {
             const state = e.state || e.code || "ERROR";
@@ -178,7 +191,7 @@ class AutoSync {
                 error: firstLine(e.message),
                 conflicts: e.conflicts || 0
             };
-            if (TRANSIENT.has(state)) this.log(`sync failed: ${this.state.error}`); else this.halt(state, this.state.error);
+            if (this.retry(state)) this.log(`sync failed: ${this.state.error}`); else this.halt(state, this.state.error);
         } finally {
             this.running = false;
         }
