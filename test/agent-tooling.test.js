@@ -85,6 +85,8 @@ function agentCli(env, args, input) {
             stdout: stdout,
             stderr: stderr
         }));
+        // A CLI that refuses before it reads stdin exits and closes it; the write then fails with EPIPE.
+        child.stdin.on("error", () => {});
         if (input !== undefined) child.stdin.end(input); else child.stdin.end();
     });
 }

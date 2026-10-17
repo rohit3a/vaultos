@@ -333,6 +333,8 @@ test("CLI sync pull prints why it stopped, and keeps file errors generic", async
             code: error ? error.code : 0,
             output: stdout + stderr
         }));
+        // A CLI that refuses before it reads stdin exits and closes it; the write then fails with EPIPE.
+        child.stdin.on("error", () => {});
         child.stdin.end("synthetic-password-a\n");
     });
     const pulled = await cli("sync", "pull");

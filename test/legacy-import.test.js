@@ -238,6 +238,8 @@ function setup(t, mutate) {
             stdout: stdout,
             stderr: stderr
         }));
+        // A CLI that refuses before it reads stdin exits and closes it; the write then fails with EPIPE.
+        child.stdin.on("error", () => {});
         child.stdin.end(input);
     });
     return {
