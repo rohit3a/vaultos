@@ -6,9 +6,11 @@ const fs = require("node:fs");
 
 const path = require("node:path");
 
+// Every path VaultOS hands Git is a file or folder name, never a pattern. Without
+// --literal-pathspecs a stray file named `records/*` would match every record.
 function git(repo, args, {timeout: timeout = 6e4} = {}) {
     try {
-        const stdout = execFileSync("git", [ "-c", "core.hooksPath=/dev/null", "-C", repo, ...args ], {
+        const stdout = execFileSync("git", [ "--literal-pathspecs", "-c", "core.hooksPath=/dev/null", "-C", repo, ...args ], {
             encoding: "utf8",
             timeout: timeout,
             stdio: [ "ignore", "pipe", "pipe" ],
@@ -124,9 +126,12 @@ class GitRepo {
         const r = git(this.dir, [ "rev-parse", `${remote}/${branch}` ]);
         return r.ok ? r.out : null;
     }
-    commitPaths(paths, message) {
+    // Commits `paths` as they are in the working tree, and removes `untrack` from the
+    // repository while leaving those files on disk.
+    commitPaths(paths, message, {untrack: untrack = []} = {}) {
+        const all = [ ...paths, ...untrack ];
         // With no paths, `git add --` adds nothing but `git reset --` would unstage everything.
-        if (!paths.length) return {
+        if (!all.length) return {
             ok: true,
             committed: false,
             sha: this.head()
@@ -136,7 +141,7 @@ class GitRepo {
             ok: false,
             error: pre.error
         };
-        const unrelated = pre.out.split("\n").filter(f => f && !paths.some(p => f === p || f.startsWith(p + "/")));
+        const unrelated = pre.out.split("\n").filter(f => f && !all.some(p => f === p || f.startsWith(p + "/")));
         if (unrelated.length) return {
             ok: false,
             error: `Unrelated staged files; refusing to commit: ${unrelated.slice(0, 3).join(", ")}`
@@ -144,14 +149,20 @@ class GitRepo {
         // A failure after `git add` unstages the paths again. Left staged, they made the next
         // commit of other paths refuse, and Git does not rebase over staged changes.
         const fail = error => {
-            git(this.dir, [ "reset", "--quiet", "--", ...paths ]);
+            git(this.dir, [ "reset", "--quiet", "--", ...all ]);
             return {
                 ok: false,
                 error: error
             };
         };
-        const add = git(this.dir, [ "add", "--", ...paths ]);
+        const add = paths.length ? git(this.dir, [ "add", "--", ...paths ]) : {
+            ok: true
+        };
         if (!add.ok) return fail(add.error);
+        const rm = untrack.length ? git(this.dir, [ "rm", "--cached", "--quiet", "--ignore-unmatch", "-r", "--", ...untrack ]) : {
+            ok: true
+        };
+        if (!rm.ok) return fail(rm.error);
         const staged = git(this.dir, [ "diff", "--cached", "--name-only" ]);
         if (!staged.ok) return fail(staged.error);
         if (!staged.out) return {

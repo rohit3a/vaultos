@@ -674,3 +674,59 @@ test("a file sync did not write is refused once it arrives in a commit", t => {
     assert.throws(() => sa.pullRemote(), /refusing to pull/);
     assert.deepEqual(sa.verifyManifests().problems, [ 'Unexpected file in the sync repository: "records/.DS_Store"', 'Unexpected file in the sync repository: "tombstones/nested"' ]);
 });
+
+test("the next push takes stray files Git already tracks out of the repository and keeps the local copies", t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, repoB: repoB, remote: remote, git: git} = gitPair(t);
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "synthetic-stray"
+    });
+    assert(sa.pushRemote().delivered);
+    sb.pullRemote();
+    // Committed by hand, or by an older version that ran `git add` on whole folders.
+    const strays = [ "records/.DS_Store", "tombstones/.DS_Store", "peers/.DS_Store" ];
+    for (const f of strays) fs.writeFileSync(path.join(repoB, f), "not ciphertext");
+    git("-C", repoB, "add", ...strays);
+    git("-C", repoB, "commit", "--quiet", "-m", "stray files");
+    git("-C", repoB, "push", "--quiet", "origin", "main");
+    assert.throws(() => sa.pullRemote(), /refusing to pull/);
+    // Removed with `git rm` as docs/SYNC.md says, deleted by hand, and rewritten by Finder in a
+    // folder verification does not check.
+    git("-C", repoA, "rm", "--quiet", "records/.DS_Store");
+    fs.unlinkSync(path.join(repoA, "tombstones", ".DS_Store"));
+    fs.writeFileSync(path.join(repoA, "peers", ".DS_Store"), "rewritten by Finder");
+    const round = autosyncFor(a, repoA).run();
+    assert.equal(round.state, "OK", round.error);
+    assert.doesNotMatch(git("--git-dir", remote, "ls-tree", "-r", "--name-only", "main"), /DS_Store/);
+    assert.equal(fs.readFileSync(path.join(repoA, "peers", ".DS_Store"), "utf8"), "rewritten by Finder");
+    assert.equal(git("-C", repoA, "status", "--porcelain"), "?? peers/.DS_Store");
+    sb.pullRemote();
+    assert.equal(b.revealSecret("Example", "KEY").value, "synthetic-stray");
+});
+
+test("a stray file named like a wildcard is not read as one", t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, remote: remote, git: git} = gitPair(t);
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "synthetic-key"
+    });
+    assert(sa.pushRemote().delivered);
+    sb.pullRemote();
+    const tree = () => git("--git-dir", remote, "ls-tree", "-r", "--name-only", "main").split("\n");
+    const before = tree();
+    // Git reads `records/*` in a pathspec as every record unless told to take names literally.
+    for (const dir of [ "records", "machines", "peers" ]) fs.writeFileSync(path.join(repoA, dir, "*"), "not ciphertext");
+    a.setSecret("Example", {
+        key: "OTHER",
+        value: "synthetic-other"
+    });
+    const round = autosyncFor(a, repoA).run();
+    assert.equal(round.state, "OK", round.error);
+    const after = tree();
+    for (const f of before) assert(after.includes(f), `${f} was removed from the remote`);
+    assert(!after.some(f => f.endsWith("*")));
+    sb.pullRemote();
+    assert.equal(b.revealSecret("Example", "OTHER").value, "synthetic-other");
+});

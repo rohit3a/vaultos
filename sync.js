@@ -105,8 +105,16 @@ class Sync {
         const changed = this.git.changedPaths();
         if (!changed.ok || changed.files.some(f => !SYNC_FILE.test(f) && !SYNC_DIR.test(f))) throw new Error("Sync repository contains unrelated changes; refusing to commit");
         // Sync's own files by name, never whole folders: `git add records` also published a
-        // .DS_Store, which every peer then refused as unsigned ciphertext.
-        const commit = this.git.commitPaths(changed.files.filter(f => SYNC_FILE.test(f) && !f.startsWith("peers/")), msg);
+        // .DS_Store, which every peer then refused as unsigned ciphertext. A stray file Git
+        // already tracks (committed by an older version or by hand, or removed with `git rm`)
+        // is taken out of the repository instead; the local copy stays, untracked and ignored.
+        // Verification has already refused any that arrived in a folder it checks.
+        const tracked = this.git.trackedPaths([ "records", "tombstones", "machines", "manifests", "peers" ]);
+        if (!tracked.ok) throw new Error(`cannot list the sync repository's files: ${tracked.error}`);
+        const untrack = [ ...new Set([ ...changed.files, ...tracked.files ]) ].filter(stray);
+        const commit = this.git.commitPaths(changed.files.filter(f => SYNC_FILE.test(f) && !f.startsWith("peers/")), msg, {
+            untrack: untrack
+        });
         this.publishHeartbeat();
         const heartbeatCommit = this.git.commitPaths([ `peers/${this.machineId()}.json` ], `heartbeat: ${this.machineId()}`);
         // The next round commits whatever a failed commit left (commitLeftovers), so a failed
