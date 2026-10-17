@@ -792,3 +792,108 @@ test("a halt on failed verification records the reason, not just that the pull w
     assert.equal(auto.publicStatus().error, undefined);
     assert.equal(a.revealSecret("Example", "KEY").value, "synthetic-tamper");
 });
+
+test("files only this checkout has are left alone outside the sync folders too", t => {
+    const {a: a, b: b, sa: sa, repoA: repoA, repoB: repoB, remote: remote, git: git} = gitPair(t);
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "synthetic-root"
+    });
+    // Finder's .DS_Store in the checkout itself, Vim's swap file for recipients.txt, an editor's settings.
+    const strays = [ ".DS_Store", ".recipients.txt.swp", ".vscode/settings.json" ];
+    fs.mkdirSync(path.join(repoA, ".vscode"));
+    for (const f of strays) fs.writeFileSync(path.join(repoA, f), "not sync's");
+    const roundA = new AutoSync(a, {
+        repo: repoA
+    }).run({
+        manual: true
+    });
+    assert.deepEqual({
+        state: roundA.state,
+        halted: roundA.halted,
+        error: roundA.error
+    }, {
+        state: "OK",
+        halted: false,
+        error: null
+    });
+    const roundB = new AutoSync(b, {
+        repo: repoB
+    }).run({
+        manual: true
+    });
+    assert.equal(roundB.state, "OK");
+    assert.equal(b.revealSecret("Example", "KEY").value, "synthetic-root");
+    assert.deepEqual(roundB.peerProblems, []);
+    assert.deepEqual(sa.statusRemote().uncommittedFiles, []);
+    const published = git("--git-dir", remote, "log", "--format=", "--name-only").split("\n");
+    for (const f of strays) {
+        assert(!published.includes(f), `${f} was committed`);
+        assert(fs.existsSync(path.join(repoA, f)), `${f} was deleted`);
+    }
+});
+
+test("a file only this checkout has does not stop a round committing what an earlier round left", t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, git: git} = gitPair(t);
+    a.createProject("Shared");
+    a.setSecret("Shared", {
+        key: "FROM_A",
+        value: "synthetic-a"
+    });
+    leaveRoundUncommitted(sa);
+    fs.writeFileSync(path.join(repoA, ".DS_Store"), "not sync's");
+    b.createProject("Other");
+    b.setSecret("Other", {
+        key: "FROM_B",
+        value: "synthetic-b"
+    });
+    assert(sb.pushRemote().delivered);
+    const round = autosyncFor(a, repoA).run();
+    assert.equal(round.state, "OK", round.error);
+    assert.equal(git("-C", repoA, "status", "--porcelain"), "?? .DS_Store");
+    sb.pullRemote();
+    assert.equal(b.revealSecret("Shared", "FROM_A").value, "synthetic-a");
+});
+
+test("a Git control file in the checkout stops a push instead of changing what it commits", t => {
+    const {a: a, b: b, repoA: repoA, repoB: repoB} = gitPair(t);
+    const autoA = new AutoSync(a, {
+        repo: repoA
+    }), autoB = new AutoSync(b, {
+        repo: repoB
+    });
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "synthetic-control"
+    });
+    // Committed without the record it hid, this device's manifest would sign a file no peer
+    // receives, and every peer would refuse the repository.
+    const ignore = path.join(repoA, "records", ".gitignore");
+    fs.writeFileSync(ignore, "*.age\n");
+    let round = autoA.run({
+        manual: true
+    });
+    assert.equal(round.state, "ERROR");
+    assert.match(round.error, /unrelated changes; refusing to commit: "records\/\.gitignore"/);
+    assert.equal(autoB.run({
+        manual: true
+    }).state, "OK");
+    fs.unlinkSync(ignore);
+    // .gitattributes can rewrite the bytes Git stores for ciphertext.
+    const attributes = path.join(repoA, ".gitattributes");
+    fs.writeFileSync(attributes, "*.age text\n");
+    round = autoA.run({
+        manual: true
+    });
+    assert.match(round.error, /refusing to commit: "\.gitattributes"/);
+    fs.unlinkSync(attributes);
+    assert.equal(autoA.run({
+        manual: true
+    }).state, "OK");
+    assert.equal(autoB.run({
+        manual: true
+    }).state, "OK");
+    assert.equal(b.revealSecret("Example", "KEY").value, "synthetic-control");
+});

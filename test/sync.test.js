@@ -269,7 +269,7 @@ test("new approved recipients receive re-encrypted existing records", t => {
     assert.equal(c.revealSecret("Example", "K").value, "existing-synthetic");
 });
 
-test("Git transport verifies a real remote receipt and refuses unrelated files", t => {
+test("Git transport verifies a real remote receipt and refuses unrelated changes", t => {
     const {a: a, sa: sa, repo: repo, dir: dir} = make(t), {execFileSync: execFileSync} = require("node:child_process");
     const git = (...args) => execFileSync("git", args, {
         stdio: "pipe",
@@ -292,9 +292,14 @@ test("Git transport verifies a real remote receipt and refuses unrelated files",
     const result = sa.pushRemote();
     assert(result.delivered, JSON.stringify(result));
     assert.equal(result.remoteCommit, result.sourceCommit);
+    // A file only this checkout has is left alone: not published, not deleted, not a reason to stop.
     fs.writeFileSync(path.join(repo, "unrelated.txt"), "must not publish");
-    assert.throws(() => sa.pushRemote(), /unrelated/);
+    assert(sa.pushRemote().delivered);
+    // Once it is given to Git, it is a change to the sync repository that sync did not make.
+    git("-C", repo, "add", "unrelated.txt");
+    assert.throws(() => sa.pushRemote(), /unrelated changes; refusing to commit: "unrelated\.txt"/);
     assert(!git("--git-dir", remote, "ls-tree", "--name-only", "HEAD").toString().includes("unrelated"));
+    assert(fs.existsSync(path.join(repo, "unrelated.txt")));
 });
 
 test("CLI sync pull prints why it stopped, and keeps file errors generic", async t => {
