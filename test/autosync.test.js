@@ -834,6 +834,41 @@ test("files only this checkout has are left alone outside the sync folders too",
     }
 });
 
+test("a sync file that Git ignores outside the checkout stops a push instead of going missing", t => {
+    const {a: a, b: b, repoA: repoA, repoB: repoB} = gitPair(t);
+    const autoA = new AutoSync(a, {
+        repo: repoA
+    }), autoB = new AutoSync(b, {
+        repo: repoB
+    });
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "synthetic-excluded"
+    });
+    // An exclude rule outside any .gitignore (here .git/info/exclude, or a global excludes file)
+    // hides the new record from `git status`. Committed without it, the manifest would sign a
+    // file no peer receives.
+    const exclude = path.join(repoA, ".git", "info", "exclude");
+    fs.appendFileSync(exclude, "*.age\n");
+    const round = autoA.run({
+        manual: true
+    });
+    assert.equal(round.state, "ERROR");
+    assert.match(round.error, /^Git ignores files sync wrote; refusing to commit: "records\/[a-f0-9]{64}\.age"/);
+    assert.equal(autoB.run({
+        manual: true
+    }).state, "OK");
+    fs.writeFileSync(exclude, "");
+    assert.equal(autoA.run({
+        manual: true
+    }).state, "OK");
+    assert.equal(autoB.run({
+        manual: true
+    }).state, "OK");
+    assert.equal(b.revealSecret("Example", "KEY").value, "synthetic-excluded");
+});
+
 test("a file only this checkout has does not stop a round committing what an earlier round left", t => {
     const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, git: git} = gitPair(t);
     a.createProject("Shared");

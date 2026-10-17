@@ -128,6 +128,13 @@ class Sync {
         const changes = this.changes();
         if (!changes) throw new Error("Cannot list the sync repository's changes; refusing to commit");
         if (changes.unrelated.length) throw new Error(`Sync repository contains unrelated changes; refusing to commit: ${changes.unrelated.slice(0, 3).map(f => JSON.stringify(f)).join(", ")}`);
+        // An ignore rule outside the checkout (.git/info/exclude, a global excludes file) hides a
+        // file sync wrote from `git status`. Committed without it, this device's manifest would
+        // sign a file no peer receives, and every peer would refuse the repository.
+        const ignored = this.git.ignoredPaths([ "records", "tombstones", "machines", "manifests", "peers", "recipients.txt", "vaultos-sync.json" ]);
+        if (!ignored.ok) throw new Error(`cannot list the sync repository's files: ${ignored.error}`);
+        const hidden = ignored.files.filter(f => SYNC_FILE.test(f));
+        if (hidden.length) throw new Error(`Git ignores files sync wrote; refusing to commit: ${hidden.slice(0, 3).map(f => JSON.stringify(f)).join(", ")}`);
         // Sync's own files by name, never whole folders: `git add records` also published a
         // .DS_Store, which every peer then refused as unsigned ciphertext. A stray file Git
         // already tracks (committed by an older version or by hand, or removed with `git rm`)

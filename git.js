@@ -68,6 +68,18 @@ class GitRepo {
             files: new Set(r.out.split("\0").filter(Boolean))
         };
     }
+    // The untracked files under these paths that Git's ignore rules hide from `git status`.
+    ignoredPaths(paths) {
+        const r = git(this.dir, [ "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", ...paths ]);
+        if (!r.ok) return {
+            ok: false,
+            error: r.error
+        };
+        return {
+            ok: true,
+            files: r.out.split("\0").filter(Boolean)
+        };
+    }
     // Each path that differs from HEAD, staged or not, as a plain repository path. Files in an
     // untracked directory are listed one by one.
     changedPaths() {
