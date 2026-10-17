@@ -37,7 +37,7 @@ Autosync never accepts conflicts. If a pull would need acceptance, or verificati
 
 ## Stop conditions
 
-A signature, recipient, replay, or unreadable-record error is a stop condition. Restore trusted copies or investigate the cause; do not bypass validation. Repository hooks are disabled for application Git operations. Configure credentials using your normal Git tools outside VaultOS.
+A signature, recipient, replay, or unreadable-record error is a stop condition. Restore trusted copies or investigate the cause; do not bypass validation. In its folders (`records/`, `tombstones/`, `manifests/`, `machines/`, `peers/`), sync never commits, reads or deletes a file under a name it does not write, such as a `.DS_Store` that Finder leaves there; while only your checkout has such a file, sync ignores it. If one arrives in a commit, every device refuses to pull (`Unexpected file in the sync repository`): find out who committed it, then remove it with `git rm` and push. A change outside those folders still stops a push as unrelated. Repository hooks are disabled for application Git operations. Configure credentials using your normal Git tools outside VaultOS.
 
 ## Keys and deletion
 

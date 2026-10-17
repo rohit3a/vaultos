@@ -54,21 +54,20 @@ class GitRepo {
         const r = git(this.dir, [ "rev-parse", "HEAD" ]);
         return r.ok ? r.out : null;
     }
-    dirty() {
-        const r = git(this.dir, [ "status", "--porcelain" ]);
+    // The files under these paths that Git tracks, committed or staged.
+    trackedPaths(paths) {
+        const r = git(this.dir, [ "ls-files", "-z", "--", ...paths ]);
         if (!r.ok) return {
             ok: false,
             error: r.error
         };
-        const files = r.out ? r.out.split("\n").filter(Boolean) : [];
         return {
             ok: true,
-            dirty: files.length > 0,
-            files: files
+            files: new Set(r.out.split("\0").filter(Boolean))
         };
     }
-    // Each path that differs from HEAD, staged or not, as a plain repository path. Unlike
-    // dirty(), files in an untracked directory are listed one by one.
+    // Each path that differs from HEAD, staged or not, as a plain repository path. Files in an
+    // untracked directory are listed one by one.
     changedPaths() {
         const r = git(this.dir, [ "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all" ]);
         if (!r.ok) return {
@@ -126,6 +125,12 @@ class GitRepo {
         return r.ok ? r.out : null;
     }
     commitPaths(paths, message) {
+        // With no paths, `git add --` adds nothing but `git reset --` would unstage everything.
+        if (!paths.length) return {
+            ok: true,
+            committed: false,
+            sha: this.head()
+        };
         const pre = git(this.dir, [ "diff", "--cached", "--name-only" ]);
         if (!pre.ok) return {
             ok: false,

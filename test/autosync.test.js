@@ -577,3 +577,100 @@ test("leftovers do not carry a round past records this machine cannot decrypt", 
     assert.equal(git("--git-dir", remote, "rev-parse", "main"), remoteHead);
     assert.throws(() => a.revealSecret("Shared", "FROM_B"));
 });
+
+test("files sync did not write are never committed, read or deleted, and halt neither device", t => {
+    const {a: a, b: b, sa: sa, repoA: repoA, repoB: repoB, remote: remote, git: git} = gitPair(t);
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "synthetic-stray"
+    });
+    // Finder's .DS_Store, a stray .age file and the temporary file of an interrupted atomicWrite.
+    const strays = [ "records/.DS_Store", "records/notes.age", `tombstones/.${"0".repeat(64)}.age.${"0".repeat(24)}`, "manifests/.DS_Store", "machines/.DS_Store" ];
+    // Finder writes .DS_Store whenever a folder is open, so one can land after push() has
+    // verified the checkout and before Git stages it.
+    const push = sa.push.bind(sa);
+    sa.push = () => {
+        const wrote = push();
+        for (const f of strays) fs.writeFileSync(path.join(repoA, f), "not ciphertext");
+        return wrote;
+    };
+    sa.pullRemote();
+    assert(sa.pushRemote().delivered);
+    sa.push = push;
+    const autoB = new AutoSync(b, {
+        repo: repoB
+    });
+    const roundB = autoB.run({
+        manual: true
+    });
+    assert.deepEqual({
+        state: roundB.state,
+        halted: roundB.halted,
+        error: roundB.error
+    }, {
+        state: "OK",
+        halted: false,
+        error: null
+    });
+    assert.equal(b.revealSecret("Example", "KEY").value, "synthetic-stray");
+    // Already there when the next round starts.
+    a.setSecret("Example", {
+        key: "SECOND",
+        value: "synthetic-second"
+    });
+    const roundA = new AutoSync(a, {
+        repo: repoA
+    }).run({
+        manual: true
+    });
+    assert.deepEqual({
+        state: roundA.state,
+        error: roundA.error
+    }, {
+        state: "OK",
+        error: null
+    });
+    const roundB2 = autoB.run({
+        manual: true
+    });
+    assert.equal(roundB2.state, "OK");
+    assert.equal(b.revealSecret("Example", "SECOND").value, "synthetic-second");
+    // Nor do they count as records waiting to be sent, here or in the heartbeat B reads.
+    assert.deepEqual(roundB2.peerProblems, []);
+    assert.deepEqual(sa.statusRemote().uncommittedFiles, []);
+    // A record sync removes is still committed as removed.
+    a.deleteSecret("Example", "SECOND");
+    assert.equal(new AutoSync(a, {
+        repo: repoA
+    }).run({
+        manual: true
+    }).state, "OK");
+    assert.equal(autoB.run({
+        manual: true
+    }).state, "OK");
+    assert.deepEqual(b.listSecrets("Example").map(s => s.key), [ "KEY" ]);
+    const published = git("--git-dir", remote, "log", "--format=", "--name-only").split("\n");
+    for (const f of strays) {
+        assert(!published.includes(f), `${f} was committed`);
+        assert(fs.existsSync(path.join(repoA, f)), `${f} was deleted`);
+    }
+});
+
+test("a file sync did not write is refused once it arrives in a commit", t => {
+    const {sa: sa, repoA: repoA, repoB: repoB, git: git} = gitPair(t);
+    // An untracked file with a record's name is still checked like any record.
+    const forged = path.join(repoA, "records", "f".repeat(64) + ".age");
+    fs.writeFileSync(forged, "not signed");
+    assert(sa.verifyManifests().problems.includes("Unsigned or modified ciphertext"));
+    fs.unlinkSync(forged);
+    // As an older VaultOS, a hand-made commit or anyone with write access to the remote could.
+    fs.writeFileSync(path.join(repoB, "records", ".DS_Store"), "not ciphertext");
+    fs.mkdirSync(path.join(repoB, "tombstones", "nested"));
+    fs.writeFileSync(path.join(repoB, "tombstones", "nested", "file"), "not ciphertext");
+    git("-C", repoB, "add", "records/.DS_Store", "tombstones/nested/file");
+    git("-C", repoB, "commit", "--quiet", "-m", "stray files");
+    git("-C", repoB, "push", "--quiet", "origin", "main");
+    assert.throws(() => sa.pullRemote(), /refusing to pull/);
+    assert.deepEqual(sa.verifyManifests().problems, [ 'Unexpected file in the sync repository: "records/.DS_Store"', 'Unexpected file in the sync repository: "tombstones/nested"' ]);
+});
