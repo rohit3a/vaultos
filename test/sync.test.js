@@ -297,6 +297,50 @@ test("Git transport verifies a real remote receipt and refuses unrelated files",
     assert(!git("--git-dir", remote, "ls-tree", "--name-only", "HEAD").toString().includes("unrelated"));
 });
 
+test("CLI sync pull prints why it stopped, and keeps file errors generic", async t => {
+    const {a: a, repo: repo, dir: dir} = make(t), {execFileSync: execFileSync, execFile: execFile} = require("node:child_process");
+    const git = (...args) => execFileSync("git", args, {
+        stdio: "pipe",
+        env: {
+            ...process.env,
+            GIT_CONFIG_NOSYSTEM: "1"
+        }
+    });
+    git("-C", repo, "init", "-b", "main");
+    git("-C", repo, "remote", "add", "origin", path.join(dir, "unreachable.git"));
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "API_KEY",
+        value: "synthetic-cli-private"
+    });
+    a.lock();
+    const cli = (...args) => new Promise(resolve => {
+        const child = execFile(process.execPath, [ path.resolve("cli.cjs"), ...args, "--password-stdin" ], {
+            env: {
+                PATH: process.env.PATH,
+                HOME: dir,
+                GIT_CONFIG_NOSYSTEM: "1",
+                VAULTOS_DATA_DIR: a.dataDir,
+                VAULTOS_SYNC_REPO: repo
+            },
+            timeout: 6e4
+        }, (error, stdout, stderr) => resolve({
+            code: error ? error.code : 0,
+            output: stdout + stderr
+        }));
+        child.stdin.end("synthetic-password-a\n");
+    });
+    const pulled = await cli("sync", "pull");
+    assert.equal(pulled.code, 1);
+    assert.match(pulled.output, /cannot update the sync repo: .*unreachable\.git/);
+    assert(!pulled.output.includes("synthetic-cli-private"));
+    const missing = path.join(dir, "missing-peer.json");
+    const trusted = await cli("sync", "trust", missing);
+    assert.equal(trusted.code, 1);
+    assert.match(trusted.output, /File operation failed; check permissions and paths/);
+    assert(!trusted.output.includes(missing), "file errors do not print paths");
+});
+
 test("sync finds age where installers put it when PATH lacks it (the Dock's PATH on macOS)", {
     skip: process.platform === "win32"
 }, t => {

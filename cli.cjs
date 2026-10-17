@@ -140,7 +140,12 @@ async function main() {
     }
 }
 
+// Node's own errors (ENOENT, EACCES, ERR_…) can name paths or echo arguments, so they get a generic
+// line. Sync errors also carry a code (REMOTE_UNREACHABLE, UNREADABLE_RECORDS…), but their message is
+// the reason sync stopped and never holds a secret value.
+const nodeError = e => e.errno !== undefined || e.syscall !== undefined || /^(?:E[A-Z0-9]+|ERR_\w+)$/.test(e.code);
+
 main().catch(e => {
-    console.error(e instanceof SyntaxError ? "Invalid file format" : e.code ? "File operation failed; check permissions and paths" : e.message);
+    console.error(e instanceof SyntaxError ? "Invalid file format" : nodeError(e) ? "File operation failed; check permissions and paths" : e.message);
     process.exitCode = 1;
 });
