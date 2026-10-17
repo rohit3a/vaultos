@@ -5,7 +5,7 @@ const fs = require("node:fs"), path = require("node:path");
 
 const {Store: Store} = require("./store"), {passwordPrompt: passwordPrompt} = require("./prompt"), {claim: claim} = require("./session");
 
-const {atomicWrite: atomicWrite, privateDir: privateDir, regularFile: regularFile} = require("./fs-safe");
+const {atomicWrite: atomicWrite, nodeError: nodeError, privateDir: privateDir, regularFile: regularFile} = require("./fs-safe");
 
 async function main() {
     const args = process.argv.slice(2).filter(x => x !== "--password-stdin");
@@ -139,11 +139,6 @@ async function main() {
         release();
     }
 }
-
-// Node's own errors (ENOENT, EACCES, ERR_…) can name paths or echo arguments, so they get a generic
-// line. Sync errors also carry a code (REMOTE_UNREACHABLE, UNREADABLE_RECORDS…), but their message is
-// the reason sync stopped and never holds a secret value.
-const nodeError = e => e.errno !== undefined || e.syscall !== undefined || /^(?:E[A-Z0-9]+|ERR_\w+)$/.test(e.code);
 
 main().catch(e => {
     console.error(e instanceof SyntaxError ? "Invalid file format" : nodeError(e) ? "File operation failed; check permissions and paths" : e.message);

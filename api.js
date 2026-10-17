@@ -10,7 +10,7 @@ const {randomToken: randomToken, safeEqual: safeEqual} = require("./crypto");
 
 const {Agents: Agents} = require("./agents");
 
-const {checkedPath: checkedPath} = require("./fs-safe");
+const {checkedPath: checkedPath, nodeError: nodeError} = require("./fs-safe");
 
 const {deployment: deployment} = require("./version");
 
@@ -140,7 +140,7 @@ function startApi(store, {onShutdown: onShutdown = null, autoSync: autoSync = nu
                 send(200, result);
             } catch (e) {
                 send(e.status || 400, {
-                    error: e instanceof SyntaxError ? "Invalid JSON" : e.code ? "File operation failed; check permissions and retry" : e.message
+                    error: e instanceof SyntaxError ? "Invalid JSON" : nodeError(e) ? "File operation failed; check permissions and retry" : e.message
                 });
             }
         });
