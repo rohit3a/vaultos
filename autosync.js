@@ -16,7 +16,7 @@ const DEBOUNCE_MS = 5e3;
 const START_DELAY_MS = 1500;
 
 // Network trouble is retried on the next round. Every other failure needs a human.
-const TRANSIENT = new Set([ "REMOTE_UNREACHABLE", "PUSH_REJECTED", "RECEIPT_UNVERIFIED" ]);
+const TRANSIENT = new Set([ "REMOTE_UNREACHABLE", "PUSH_REJECTED", "RECEIPT_UNVERIFIED", "VAULT_BUSY" ]);
 
 // A failed local commit is retried as well, because the next round first commits what it left
 // (Sync.commitLeftovers). One that fails this many rounds running (a stale index.lock, no Git
@@ -156,7 +156,11 @@ class AutoSync {
         const wasHalted = this.halted;
         const attemptAt = (new Date).toISOString();
         try {
-            this.store.reloadIfChanged();
+            // Another process has replaced vault.enc but still holds write.lock. Sync its copy on
+            // a later round, not the stale one in memory.
+            if (!this.store.reloadIfChanged() && this.store.changedOnDisk()) throw Object.assign(new Error("Another process is still saving the vault; the next round syncs its copy"), {
+                state: "VAULT_BUSY"
+            });
             const sync = new Sync(this.store, this.repo);
             const pulled = sync.pullRemote();
             const pushed = sync.pushRemote({

@@ -444,6 +444,31 @@ test("a failed commit unstages what it staged, and autosync retries instead of h
     assert.equal(b.revealSecret("Shared", "FROM_A").value, "synthetic-a");
 });
 
+test("a round waits for another process that is still saving the vault, and does not halt", t => {
+    const {a: a, b: b, sb: sb, repoA: repoA} = gitPair(t);
+    const auto = autosyncFor(a, repoA);
+    const other = new Store(a.dataDir);
+    other.unlock("synthetic-password-a");
+    other.createProject("Saved elsewhere");
+    other.setSecret("Saved elsewhere", {
+        key: "OTHER",
+        value: "synthetic-other"
+    });
+    // That process (the CLI, say) has renamed vault.enc into place but not yet released its
+    // lock. A live pid that is not this process stands in for it.
+    const lock = path.join(a.dataDir, "write.lock");
+    fs.writeFileSync(lock, String(process.ppid));
+    const waiting = auto.run();
+    assert.equal(waiting.state, "VAULT_BUSY");
+    assert.equal(waiting.halted, false);
+    assert(!a.readAudit().some(e => e.action === "sync_halted"));
+    fs.unlinkSync(lock);
+    const round = auto.run();
+    assert.equal(round.state, "OK", round.error);
+    sb.pullRemote();
+    assert.equal(b.revealSecret("Saved elsewhere", "OTHER").value, "synthetic-other");
+});
+
 test("a commit that keeps failing halts after three rounds, with Git's reason in the activity log", t => {
     const {a: a, repoA: repoA, git: git} = gitPair(t);
     a.createProject("Shared");

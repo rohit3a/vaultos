@@ -267,9 +267,17 @@ class Store {
         // discarding anything this process has not saved.
         if (!this.changedOnDisk()) return false;
         if (this.unsavedChanges()) throw new Error("The vault changed on disk while this process holds unsaved changes; refusing to reload over them");
+        const session = require("./session");
         let releaseWrite;
         try {
-            releaseWrite = require("./session").claim(this.dataDir, "write.lock");
+            try {
+                releaseWrite = session.claim(this.dataDir, "write.lock");
+            } catch (e) {
+                // A writer renames vault.enc into place before it releases write.lock. Until it
+                // does, its save is not finished: report no change, and the next check reloads it.
+                if (session.lockOwner(this.dataDir, "write.lock")) return false;
+                throw e;
+            }
             regularFile(this.vaultPath);
             const stat = diskStat(this.vaultPath);
             const bytes = fs.readFileSync(this.vaultPath, "utf8");
