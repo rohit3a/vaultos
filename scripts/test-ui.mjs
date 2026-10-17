@@ -8,13 +8,23 @@ import path from "node:path";
 
 import assert from "node:assert/strict";
 
+import { execFileSync } from "node:child_process";
+
 const dir = mkdtempSync(path.join(realpathSync(tmpdir()), "vaultos-ui-test-"));
+
+// A sync checkout whose remote does not exist, so a pull fails before it touches the vault.
+const syncRepo = path.join(dir, "sync-repository");
+
+execFileSync("git", [ "init", "-q", syncRepo ]);
+
+execFileSync("git", [ "-C", syncRepo, "remote", "add", "origin", path.join(dir, "unreachable.git") ]);
 
 const app = await electron.launch({
     args: [ "." ],
     env: {
         ...process.env,
-        VAULTOS_DATA_DIR: path.join(dir, "data")
+        VAULTOS_DATA_DIR: path.join(dir, "data"),
+        VAULTOS_SYNC_REPO: syncRepo
     }
 });
 
@@ -108,7 +118,16 @@ try {
     const attempted = await page.evaluate(() => window.open("https://example.com"));
     assert.equal(attempted, null);
     assert.equal((await app.windows()).length, 1);
-    console.log("Desktop flow passed: setup, locked IPC, create, reveal, lock, unlock, blocked popups. Synthetic screenshot saved.");
+    const pullError = await page.evaluate(async () => {
+        try {
+            await window.vault.syncPull(false);
+            return null;
+        } catch (e) {
+            return e.message;
+        }
+    });
+    assert.match(pullError, /cannot update the sync repo: .*unreachable\.git/, "a failed pull says why, not that a file operation failed");
+    console.log("Desktop flow passed: setup, locked IPC, create, reveal, lock, unlock, blocked popups, sync pull reason. Synthetic screenshot saved.");
 } finally {
     await app.close();
     rmSync(dir, {

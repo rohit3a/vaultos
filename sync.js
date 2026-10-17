@@ -27,6 +27,10 @@ const SYNC_DIR = /^(?:records|tombstones|machines|manifests|peers)\//;
 
 const stray = file => SYNC_DIR.test(file) && !SYNC_FILE.test(file);
 
+// Git's own control files. One in the checkout changes what Git commits (a .gitignore can keep
+// out a record that this device's manifest signs) or the bytes it stores, so it is never left alone.
+const GIT_CONTROL = /(?:^|\/)\.git(?:ignore|attributes|modules)$/;
+
 // The desktop app, opened from the Dock or Finder, gets launchd's PATH (/usr/bin:/bin:/usr/sbin:/sbin),
 // not the shell's. age installed with Homebrew or into ~/.local/bin is then invisible to it, sync
 // fails with "age is not installed" and halts, while the same vault syncs from a terminal. So a tool
@@ -44,6 +48,12 @@ function findTool(name, {pathEnv: pathEnv = process.env.PATH || "", extraDirs: e
     }
     return name;
 }
+
+// Verification failed. On one line: an autosync halt and its activity-log entry keep only the first.
+const refusal = problems => Object.assign(new Error(`refusing to pull: ${problems.join("; ")}`), {
+    state: "SIGNATURE_INVALID",
+    status: 409
+});
 
 class Sync {
     constructor(store, repoDir) {
@@ -80,11 +90,24 @@ class Sync {
             ...extra
         };
     }
-    // Changed paths that a push still has to commit, or null if Git cannot say. A file sync
-    // did not write in one of its folders never will be, so it is not counted.
+    // The checkout's changes that matter to a push, or null if Git cannot say: sync's own files,
+    // which it commits, and changes it refuses to commit beside. The rest is left alone: a file
+    // sync did not write in one of its folders, and any file only this checkout has (Finder's
+    // .DS_Store, an editor's swap file), which this account made and nothing reads.
+    changes() {
+        const changed = this.git.changedPaths(), tracked = this.git.trackedPaths([ "." ]);
+        if (!changed.ok || !tracked.ok) return null;
+        const alone = f => !GIT_CONTROL.test(f) && (SYNC_DIR.test(f) || !tracked.files.has(f));
+        return {
+            own: changed.files.filter(f => SYNC_FILE.test(f)),
+            stray: changed.files.filter(stray),
+            unrelated: changed.files.filter(f => !SYNC_FILE.test(f) && !alone(f))
+        };
+    }
+    // Changed paths that a push still has to commit or that stop it, or null if Git cannot say.
     unsent() {
-        const changed = this.git.changedPaths();
-        return changed.ok ? changed.files.filter(f => !stray(f)) : null;
+        const changes = this.changes();
+        return changes ? [ ...changes.own, ...changes.unrelated ] : null;
     }
     // The names in records/ or tombstones/ that sync writes and reads.
     syncFiles(dir) {
@@ -102,8 +125,16 @@ class Sync {
             };
         }
         const msg = message || `vault sync: ${wrote.written} record(s) from ${this.machineId()}`;
-        const changed = this.git.changedPaths();
-        if (!changed.ok || changed.files.some(f => !SYNC_FILE.test(f) && !SYNC_DIR.test(f))) throw new Error("Sync repository contains unrelated changes; refusing to commit");
+        const changes = this.changes();
+        if (!changes) throw new Error("Cannot list the sync repository's changes; refusing to commit");
+        if (changes.unrelated.length) throw new Error(`Sync repository contains unrelated changes; refusing to commit: ${changes.unrelated.slice(0, 3).map(f => JSON.stringify(f)).join(", ")}`);
+        // An ignore rule outside the checkout (.git/info/exclude, a global excludes file) hides a
+        // file sync wrote from `git status`. Committed without it, this device's manifest would
+        // sign a file no peer receives, and every peer would refuse the repository.
+        const ignored = this.git.ignoredPaths([ "records", "tombstones", "machines", "manifests", "peers", "recipients.txt", "vaultos-sync.json" ]);
+        if (!ignored.ok) throw new Error(`cannot list the sync repository's files: ${ignored.error}`);
+        const hidden = ignored.files.filter(f => SYNC_FILE.test(f));
+        if (hidden.length) throw new Error(`Git ignores files sync wrote; refusing to commit: ${hidden.slice(0, 3).map(f => JSON.stringify(f)).join(", ")}`);
         // Sync's own files by name, never whole folders: `git add records` also published a
         // .DS_Store, which every peer then refused as unsigned ciphertext. A stray file Git
         // already tracks (committed by an older version or by hand, or removed with `git rm`)
@@ -111,8 +142,8 @@ class Sync {
         // Verification has already refused any that arrived in a folder it checks.
         const tracked = this.git.trackedPaths([ "records", "tombstones", "machines", "manifests", "peers" ]);
         if (!tracked.ok) throw new Error(`cannot list the sync repository's files: ${tracked.error}`);
-        const untrack = [ ...new Set([ ...changed.files, ...tracked.files ]) ].filter(stray);
-        const commit = this.git.commitPaths(changed.files.filter(f => SYNC_FILE.test(f) && !f.startsWith("peers/")), msg, {
+        const untrack = [ ...new Set([ ...changes.stray, ...tracked.files ]) ].filter(stray);
+        const commit = this.git.commitPaths(changes.own.filter(f => !f.startsWith("peers/")), msg, {
             untrack: untrack
         });
         this.publishHeartbeat();
@@ -186,15 +217,14 @@ class Sync {
     // A round that stops between writing its files and committing them (a failed commit, a
     // crash) leaves them in the working tree, and Git will not rebase onto a peer's commits
     // until they are committed or stashed. They are this machine's own output, regenerated and
-    // signed by every push, so the next round commits them before it fetches. Files sync did
-    // not write are skipped, as everywhere else. If anything else changed, nothing is committed
+    // signed by every push, so the next round commits them before it fetches. Files left alone
+    // by changes() are skipped, as everywhere else. If anything else changed, nothing is committed
     // or discarded; leftovers that do not verify stay as they are and stop the round for the
     // reason a pull would give.
     commitLeftovers() {
-        const changed = this.git.changedPaths();
-        if (!changed.ok) return null;
-        const files = changed.files.filter(f => !stray(f));
-        if (!files.length) return null;
+        const changes = this.changes();
+        if (!changes || changes.unrelated.length || !changes.own.length) return null;
+        const files = changes.own;
         const id = this.machineId();
         const own = f => f === `manifests/${id}.json` || f === `peers/${id}.json` || /^(?:records|tombstones)\/[a-f0-9]{64}\.age$/.test(f);
         if (!files.every(own)) return null;
@@ -203,9 +233,7 @@ class Sync {
         const ver = this.verifyManifests({
             remember: false
         });
-        if (ver.problems.length) throw Object.assign(new Error(`refusing to pull:\n  ${ver.problems.join("\n  ")}`), {
-            status: 409
-        });
+        if (ver.problems.length) throw refusal(ver.problems);
         const c = this.git.commitPaths(files, `vault sync: ${files.length} file(s) left uncommitted by an earlier round from ${id}`);
         if (!c.ok) throw Object.assign(new Error(`cannot commit what an earlier round left: ${c.error}`), {
             code: "COMMIT_FAILED",
@@ -456,7 +484,9 @@ class Sync {
         this.requireAge();
         this.ensureDirs();
         const validation = this.verifyManifests();
-        if (validation.problems.length) throw new Error(validation.problems.join("; "));
+        if (validation.problems.length) throw Object.assign(new Error(validation.problems.join("; ")), {
+            state: "SIGNATURE_INVALID"
+        });
         const idx = this.readIndex();
         const local = this.localRecords();
         const tombs = this.localTombstones();
@@ -671,11 +701,7 @@ class Sync {
         this.requireAge();
         this.ensureDirs();
         const ver = this.verifyManifests();
-        if (ver.problems.length) {
-            const e = new Error(`refusing to pull:\n  ${ver.problems.join("\n  ")}`);
-            e.status = 409;
-            throw e;
-        }
+        if (ver.problems.length) throw refusal(ver.problems);
         const remote = new Map;
         const unreadable = [];
         for (const f of this.syncFiles("records")) {

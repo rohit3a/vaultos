@@ -269,7 +269,7 @@ test("new approved recipients receive re-encrypted existing records", t => {
     assert.equal(c.revealSecret("Example", "K").value, "existing-synthetic");
 });
 
-test("Git transport verifies a real remote receipt and refuses unrelated files", t => {
+test("Git transport verifies a real remote receipt and refuses unrelated changes", t => {
     const {a: a, sa: sa, repo: repo, dir: dir} = make(t), {execFileSync: execFileSync} = require("node:child_process");
     const git = (...args) => execFileSync("git", args, {
         stdio: "pipe",
@@ -292,9 +292,58 @@ test("Git transport verifies a real remote receipt and refuses unrelated files",
     const result = sa.pushRemote();
     assert(result.delivered, JSON.stringify(result));
     assert.equal(result.remoteCommit, result.sourceCommit);
+    // A file only this checkout has is left alone: not published, not deleted, not a reason to stop.
     fs.writeFileSync(path.join(repo, "unrelated.txt"), "must not publish");
-    assert.throws(() => sa.pushRemote(), /unrelated/);
+    assert(sa.pushRemote().delivered);
+    // Once it is given to Git, it is a change to the sync repository that sync did not make.
+    git("-C", repo, "add", "unrelated.txt");
+    assert.throws(() => sa.pushRemote(), /unrelated changes; refusing to commit: "unrelated\.txt"/);
     assert(!git("--git-dir", remote, "ls-tree", "--name-only", "HEAD").toString().includes("unrelated"));
+    assert(fs.existsSync(path.join(repo, "unrelated.txt")));
+});
+
+test("CLI sync pull prints why it stopped, and keeps file errors generic", async t => {
+    const {a: a, repo: repo, dir: dir} = make(t), {execFileSync: execFileSync, execFile: execFile} = require("node:child_process");
+    const git = (...args) => execFileSync("git", args, {
+        stdio: "pipe",
+        env: {
+            ...process.env,
+            GIT_CONFIG_NOSYSTEM: "1"
+        }
+    });
+    git("-C", repo, "init", "-b", "main");
+    git("-C", repo, "remote", "add", "origin", path.join(dir, "unreachable.git"));
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "API_KEY",
+        value: "synthetic-cli-private"
+    });
+    a.lock();
+    const cli = (...args) => new Promise(resolve => {
+        const child = execFile(process.execPath, [ path.resolve("cli.cjs"), ...args, "--password-stdin" ], {
+            env: {
+                PATH: process.env.PATH,
+                HOME: dir,
+                GIT_CONFIG_NOSYSTEM: "1",
+                VAULTOS_DATA_DIR: a.dataDir,
+                VAULTOS_SYNC_REPO: repo
+            },
+            timeout: 6e4
+        }, (error, stdout, stderr) => resolve({
+            code: error ? error.code : 0,
+            output: stdout + stderr
+        }));
+        child.stdin.end("synthetic-password-a\n");
+    });
+    const pulled = await cli("sync", "pull");
+    assert.equal(pulled.code, 1);
+    assert.match(pulled.output, /cannot update the sync repo: .*unreachable\.git/);
+    assert(!pulled.output.includes("synthetic-cli-private"));
+    const missing = path.join(dir, "missing-peer.json");
+    const trusted = await cli("sync", "trust", missing);
+    assert.equal(trusted.code, 1);
+    assert.match(trusted.output, /File operation failed; check permissions and paths/);
+    assert(!trusted.output.includes(missing), "file errors do not print paths");
 });
 
 test("sync finds age where installers put it when PATH lacks it (the Dock's PATH on macOS)", {

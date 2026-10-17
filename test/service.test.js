@@ -200,6 +200,25 @@ test("service waits out a manual lock and exits when background access is off", 
     assert.equal(await probeSession(off.store.sessionPath), null);
 });
 
+test("reload waits for another writer that still holds write.lock, instead of failing", t => {
+    const {store: store} = fixture(t);
+    const other = new Store(store.dataDir);
+    other.keyring = fakeKeyring();
+    other.unlock(PW);
+    other.setSecret("Example", {
+        key: "FROM_OTHER",
+        value: "synthetic-other"
+    });
+    // The other writer has renamed vault.enc into place but not yet released its lock. A live
+    // pid that is not this process stands in for it. The service's guard used to stop here.
+    const lock = path.join(store.dataDir, "write.lock");
+    fs.writeFileSync(lock, String(process.ppid));
+    assert.equal(store.reloadIfChanged(), false);
+    fs.unlinkSync(lock);
+    assert.equal(store.reloadIfChanged(), true);
+    assert(store.listSecrets("Example").some(s => s.key === "FROM_OTHER"));
+});
+
 test("reload on a changed disk keeps the other writer's data and refuses to drop unsaved changes", t => {
     const {store: store} = fixture(t);
     const other = new Store(store.dataDir);

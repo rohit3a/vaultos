@@ -78,7 +78,13 @@ function checkedPath(file, roots) {
     return target;
 }
 
+// Node's own errors (ENOENT, EACCES, ERR_…) can name paths or echo arguments, so callers show a
+// generic line for them. Sync errors also carry a code (REMOTE_UNREACHABLE, UNREADABLE_RECORDS…),
+// but their message is the reason sync stopped and never holds a secret value.
+const nodeError = e => e.errno !== undefined || e.syscall !== undefined || /^(?:E[A-Z0-9]+|ERR_\w+)$/.test(e.code);
+
 module.exports = {
+    nodeError: nodeError,
     privateDir: privateDir,
     regularFile: regularFile,
     atomicWrite: atomicWrite,

@@ -75,6 +75,12 @@ test("API enforces identity, scopes, project allowlists, path allowlists and loc
         project: "Allowed",
         target_path: path.join(dir, "outside.env")
     })).status, 400);
+    const missing = await call("/import", {
+        project: "Allowed",
+        env_path: path.join(dir, "project", "missing.env")
+    });
+    assert.equal(missing.status, 400);
+    assert.equal((await missing.json()).error, "File operation failed; check permissions and retry", "file errors do not print paths");
     assert.equal((await call("/inject", {
         project: "Allowed",
         target_path: path.join(dir, "project", ".env")

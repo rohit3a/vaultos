@@ -5,7 +5,7 @@ const fs = require("node:fs"), path = require("node:path");
 
 const {Store: Store} = require("./store"), {passwordPrompt: passwordPrompt} = require("./prompt"), {claim: claim} = require("./session");
 
-const {atomicWrite: atomicWrite, privateDir: privateDir, regularFile: regularFile} = require("./fs-safe");
+const {atomicWrite: atomicWrite, nodeError: nodeError, privateDir: privateDir, regularFile: regularFile} = require("./fs-safe");
 
 async function main() {
     const args = process.argv.slice(2).filter(x => x !== "--password-stdin");
@@ -141,6 +141,6 @@ async function main() {
 }
 
 main().catch(e => {
-    console.error(e instanceof SyntaxError ? "Invalid file format" : e.code ? "File operation failed; check permissions and paths" : e.message);
+    console.error(e instanceof SyntaxError ? "Invalid file format" : nodeError(e) ? "File operation failed; check permissions and paths" : e.message);
     process.exitCode = 1;
 });

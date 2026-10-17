@@ -20,6 +20,8 @@ const {safeEqual: safeEqual} = require("./crypto");
 
 const {defaultDataDir: defaultDataDir} = require("./paths");
 
+const {nodeError: nodeError} = require("./fs-safe");
+
 const {PROVIDERS: PROVIDERS} = require("./providers");
 
 const M = require("./model");
@@ -148,7 +150,7 @@ function handle(channel, fn, publicCall = false) {
             if (!publicCall) store.reloadIfChanged();
             return await fn(...args);
         } catch (e) {
-            throw new Error(e instanceof SyntaxError ? "Invalid file format" : e.code ? "File operation failed; check permissions and retry" : e.message);
+            throw new Error(e instanceof SyntaxError ? "Invalid file format" : nodeError(e) ? "File operation failed; check permissions and retry" : e.message);
         }
     });
 }
