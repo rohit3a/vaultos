@@ -550,7 +550,8 @@ test("leftovers that fail verification stay uncommitted, and the round halts", t
     const before = git("-C", repoA, "status", "--porcelain"), remoteHead = git("--git-dir", remote, "rev-parse", "main");
     const round = autosyncFor(a, repoA).run();
     assert.equal(round.halted, true);
-    assert.match(round.error, /refusing to pull/);
+    assert.equal(round.state, "SIGNATURE_INVALID");
+    assert.match(round.error, /^refusing to pull: .*ciphertext/);
     assert.equal(git("-C", repoA, "status", "--porcelain"), before);
     assert.equal(fs.readFileSync(path.join(repoA, "records", record), "utf8"), "tampered");
     assert.equal(git("--git-dir", remote, "rev-parse", "main"), remoteHead);
@@ -754,4 +755,40 @@ test("a stray file named like a wildcard is not read as one", t => {
     assert(!after.some(f => f.endsWith("*")));
     sb.pullRemote();
     assert.equal(b.revealSecret("Example", "OTHER").value, "synthetic-other");
+});
+
+test("a halt on failed verification records the reason, not just that the pull was refused", t => {
+    const {a: a, sa: sa, repoA: repoA, repoB: repoB, git: git} = gitPair(t);
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "KEY",
+        value: "synthetic-tamper"
+    });
+    assert(sa.pushRemote().delivered);
+    // Someone with write access to the remote alters a record.
+    git("-C", repoB, "pull", "--quiet", "--ff-only");
+    const record = fs.readdirSync(path.join(repoB, "records")).find(f => f.endsWith(".age"));
+    fs.appendFileSync(path.join(repoB, "records", record), "tampered");
+    git("-C", repoB, "commit", "--quiet", "-am", "tamper");
+    git("-C", repoB, "push", "--quiet", "origin", "main");
+    const auto = new AutoSync(a, {
+        repo: repoA
+    });
+    const round = auto.run({
+        manual: true
+    });
+    assert.deepEqual({
+        state: round.state,
+        halted: round.halted,
+        error: round.error
+    }, {
+        state: "SIGNATURE_INVALID",
+        halted: true,
+        error: "refusing to pull: Unsigned or modified ciphertext"
+    });
+    assert(a.readAudit().some(e => e.actor === "autosync" && e.action === "sync_halted" && e.detail === "SIGNATURE_INVALID: refusing to pull: Unsigned or modified ciphertext"));
+    // The unauthenticated status route still gets the state alone, never the message.
+    assert.equal(auto.publicStatus().state, "SIGNATURE_INVALID");
+    assert.equal(auto.publicStatus().error, undefined);
+    assert.equal(a.revealSecret("Example", "KEY").value, "synthetic-tamper");
 });

@@ -45,6 +45,12 @@ function findTool(name, {pathEnv: pathEnv = process.env.PATH || "", extraDirs: e
     return name;
 }
 
+// Verification failed. On one line: an autosync halt and its activity-log entry keep only the first.
+const refusal = problems => Object.assign(new Error(`refusing to pull: ${problems.join("; ")}`), {
+    state: "SIGNATURE_INVALID",
+    status: 409
+});
+
 class Sync {
     constructor(store, repoDir) {
         this.store = store;
@@ -203,9 +209,7 @@ class Sync {
         const ver = this.verifyManifests({
             remember: false
         });
-        if (ver.problems.length) throw Object.assign(new Error(`refusing to pull:\n  ${ver.problems.join("\n  ")}`), {
-            status: 409
-        });
+        if (ver.problems.length) throw refusal(ver.problems);
         const c = this.git.commitPaths(files, `vault sync: ${files.length} file(s) left uncommitted by an earlier round from ${id}`);
         if (!c.ok) throw Object.assign(new Error(`cannot commit what an earlier round left: ${c.error}`), {
             code: "COMMIT_FAILED",
@@ -456,7 +460,9 @@ class Sync {
         this.requireAge();
         this.ensureDirs();
         const validation = this.verifyManifests();
-        if (validation.problems.length) throw new Error(validation.problems.join("; "));
+        if (validation.problems.length) throw Object.assign(new Error(validation.problems.join("; ")), {
+            state: "SIGNATURE_INVALID"
+        });
         const idx = this.readIndex();
         const local = this.localRecords();
         const tombs = this.localTombstones();
@@ -671,11 +677,7 @@ class Sync {
         this.requireAge();
         this.ensureDirs();
         const ver = this.verifyManifests();
-        if (ver.problems.length) {
-            const e = new Error(`refusing to pull:\n  ${ver.problems.join("\n  ")}`);
-            e.status = 409;
-            throw e;
-        }
+        if (ver.problems.length) throw refusal(ver.problems);
         const remote = new Map;
         const unreadable = [];
         for (const f of this.syncFiles("records")) {
