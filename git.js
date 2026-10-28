@@ -131,15 +131,19 @@ class GitRepo {
     isRepo() {
         return fs.existsSync(path.join(this.dir, ".git"));
     }
+    // A GitRepo lives for one sync call, and a round asked for these a dozen times, each a
+    // separate git process. Found values are kept for that call; a missing one is asked again.
     branch() {
+        if (this.branchName) return this.branchName;
         const r = git(this.dir, [ "rev-parse", "--abbrev-ref", "HEAD" ]);
-        return r.ok ? r.out : null;
+        return r.ok && r.out ? this.branchName = r.out : null;
     }
     remoteName() {
+        if (this.remote) return this.remote;
         const r = git(this.dir, [ "remote" ]);
         if (!r.ok || !r.out) return null;
         const names = r.out.split("\n").map(s => s.trim()).filter(Boolean);
-        return names.includes("origin") ? "origin" : names[0] || null;
+        return this.remote = names.includes("origin") ? "origin" : names[0] || null;
     }
     head() {
         const r = git(this.dir, [ "rev-parse", "HEAD" ]);

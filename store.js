@@ -163,12 +163,15 @@ class Store {
         const backups=[];
         const dir=path.join(this.dataDir,'backups');
         if(reencryptBackups && fs.existsSync(dir)){
+            // Backups are copies of vault.enc and share its salt, so one derivation per salt
+            // serves them all instead of two scrypt runs per file.
+            const oldKeys={};
             for(const name of fs.readdirSync(dir)){
                 const file=path.join(dir,name);
                 try{
                     regularFile(file);
-                    const data=decryptVault(JSON.parse(fs.readFileSync(file,'utf8')),oldPassword);
-                    atomicWrite(file,JSON.stringify(encryptVault(data,newPassword)));
+                    const data=decryptVault(JSON.parse(fs.readFileSync(file,'utf8')),oldPassword,oldKeys);
+                    atomicWrite(file,JSON.stringify(encryptVault(data,newPassword,this.keyCache)));
                     backups.push({file:name,status:'re-encrypted'});
                 }catch{backups.push({file:name,status:'not re-encrypted; preserve the old password and inspect this backup'});}
             }
@@ -297,8 +300,31 @@ class Store {
         }
         return true;
     }
+    // Runs fn with every persist() inside it deferred to one save at the end, so a bulk change
+    // (an .env import) encrypts and writes the vault once instead of once per key. If fn
+    // throws, or the save fails, none of its changes are kept.
+    batch(fn) {
+        if (this.batching) return fn();
+        this.batching = true;
+        this.batchDirty = false;
+        let result;
+        try {
+            result = fn();
+        } catch (e) {
+            if (this.batchDirty) this.vault = clone(this.savedVault);
+            throw e;
+        } finally {
+            this.batching = false;
+        }
+        if (this.batchDirty) this.persist();
+        return result;
+    }
     persist() {
         if (!this.isUnlocked()) throw new Error("vault is locked");
+        if (this.batching) {
+            this.batchDirty = true;
+            return;
+        }
         let releaseWrite;
         try {
             releaseWrite = require("./session").claim(this.dataDir, "write.lock");
@@ -1010,20 +1036,22 @@ class Store {
         });
         const parsed = require("dotenv").parse(fs.readFileSync(envPath, "utf8"));
         const keys = [], refused = [];
-        for (const [key, value] of Object.entries(parsed)) {
-            try {
-                this.setSecret(p.name, {
-                    key: key,
-                    value: value
-                }, actor);
-                keys.push(key);
-            } catch (e) {
-                refused.push({
-                    key: key,
-                    why: e.message
-                });
+        this.batch(() => {
+            for (const [key, value] of Object.entries(parsed)) {
+                try {
+                    this.setSecret(p.name, {
+                        key: key,
+                        value: value
+                    }, actor);
+                    keys.push(key);
+                } catch (e) {
+                    refused.push({
+                        key: key,
+                        why: e.message
+                    });
+                }
             }
-        }
+        });
         this.audit("import", `${envPath} -> ${p.name} (${keys.length} keys)`, actor);
         return {
             project: p.name,

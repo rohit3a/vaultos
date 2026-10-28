@@ -52,6 +52,54 @@ test("sync merges synthetic records and propagates a deletion without disclosing
     assert(!b.listSecrets("Example").some(x => x.key === "SECOND"));
 });
 
+test("a pull decrypts only ciphertext it has not already read, and forgets it on lock", t => {
+    const {a: a, b: b, sa: sa, sb: sb} = make(t);
+    a.createProject("Example");
+    for (const key of [ "ONE", "TWO", "THREE" ]) a.setSecret("Example", {
+        key: key,
+        value: `synthetic-${key}`
+    });
+    sa.push();
+    let calls = 0;
+    const age = sb.age.bind(sb);
+    sb.age = (...args) => {
+        if (args[0][0] === "-d") calls++;
+        return age(...args);
+    };
+    sb.pull();
+    assert.equal(calls, 3);
+    calls = 0;
+    sb.pull();
+    assert.equal(calls, 0);
+    a.setSecret("Example", {
+        key: "TWO",
+        value: "synthetic-changed"
+    });
+    sa.push();
+    sb.pull();
+    assert.equal(calls, 1);
+    assert.equal(b.revealSecret("Example", "TWO").value, "synthetic-changed");
+    // A remembered payload is a copy: changing the merged record locally does not alter it.
+    b.setSecret("Example", {
+        key: "ONE",
+        value: "synthetic-local-edit"
+    });
+    calls = 0;
+    const plan = sb.pull({
+        apply: false
+    });
+    assert.equal(calls, 0);
+    assert.equal(plan.updated.length + plan.added.length + plan.conflicts.length, 0);
+    assert.equal(b.revealSecret("Example", "ONE").value, "synthetic-local-edit");
+    b.lock();
+    b.unlock("synthetic-password-b");
+    calls = 0;
+    sb.pull({
+        apply: false
+    });
+    assert.equal(calls, 3);
+});
+
 test("sync rejects recipient injection, signing key substitution, tampered ciphertext and replay", t => {
     const {a: a, sa: sa, repo: repo} = make(t);
     a.createProject("Example");

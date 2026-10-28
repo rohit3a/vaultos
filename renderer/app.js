@@ -39,54 +39,7 @@ const agentLabel = ref => {
     return a ? a.name : (ref || "").replace(/^agent:/, "agent ");
 };
 
-// ── Dial ───────────────────────────────────────────────────────────────────
-// The vault-door mascot from the marketing mini-game (hero-game/render.ts), as a
-// static inline SVG. It appears only on the unlock/create-vault screen and,
-// small, in the "no projects yet" empty state.
-const DIAL = {
-    rim: "#e2541c",
-    door: "#ff9658",
-    bolt: "#ffd2ad",
-    nose: "#fff2dc",
-    cheek: "rgba(255,111,143,0.55)"
-};
-
-function dialSvg(cls = "dial") {
-    const eye = side => `<ellipse cx="${side * 15}" cy="-15" rx="7.5" ry="9.5" fill="#fff" class="sp-o" stroke-width="2.4"/><circle cx="${side * 15}" cy="-13.5" r="4" class="sp-i"/><circle cx="${side * 15 + 1.4}" cy="-15.4" r="1.3" fill="#fff"/>`;
-    const ticks = Array.from({
-        length: 12
-    }, (_, i) => {
-        const a = i / 12 * Math.PI * 2, inner = i % 3 === 0 ? 7.5 : 9.5;
-        return `<line x1="${(Math.cos(a) * inner).toFixed(2)}" y1="${(Math.sin(a) * inner).toFixed(2)}" x2="${(Math.cos(a) * 11.2).toFixed(2)}" y2="${(Math.sin(a) * 11.2).toFixed(2)}" stroke="#6b5a7a" stroke-width="1.4" stroke-linecap="round"/>`;
-    }).join("");
-    const bolts = Array.from({
-        length: 10
-    }, (_, i) => {
-        const a = i / 10 * Math.PI * 2;
-        return `<circle cx="${(Math.cos(a) * 44).toFixed(1)}" cy="${(Math.sin(a) * 44).toFixed(1)}" r="2.7" fill="${DIAL.bolt}"/>`;
-    }).join("");
-    const legs = [ -1, 1 ].map(s => `<rect x="${s * 20 - 7}" y="42" width="14" height="18" rx="6" fill="${DIAL.rim}" class="sp-o" stroke-width="2.6"/><ellipse cx="${s * 23}" cy="60" rx="12" ry="6.5" fill="${DIAL.rim}" class="sp-o" stroke-width="2.6"/>`).join("");
-    const arms = [ -1, 1 ].map(s => `<g transform="translate(${s * 51} 12) rotate(${s * 28.6})"><ellipse cx="0" cy="6" rx="7.5" ry="13" fill="${DIAL.rim}" class="sp-o" stroke-width="2.6"/></g>`).join("");
-    const hinges = [ -17, 17 ].map(y => `<rect x="-46" y="${y - 5}" width="9" height="10" rx="3" fill="${DIAL.bolt}" class="sp-o" stroke-width="2"/>`).join("");
-    return `<svg class="${cls}" viewBox="-68 -58 136 142" aria-hidden="true" focusable="false">` + `<ellipse cx="0" cy="64" rx="51" ry="11" fill="rgba(80,35,30,0.16)"/>${legs}${arms}` + `<circle r="50" fill="${DIAL.rim}" class="sp-o" stroke-width="3.5"/>${bolts}<circle r="39" fill="${DIAL.door}" class="sp-o" stroke-width="3"/>${hinges}` + `${eye(-1)}${eye(1)}<ellipse cx="-26" cy="7" rx="6" ry="3.6" fill="${DIAL.cheek}"/><ellipse cx="26" cy="7" rx="6" ry="3.6" fill="${DIAL.cheek}"/>` + `<g transform="translate(0 5)"><circle r="13" fill="${DIAL.nose}" class="sp-o" stroke-width="2.6"/>${ticks}<line x1="0" y1="0" x2="0" y2="-8" stroke="${DIAL.rim}" stroke-width="3" stroke-linecap="round"/><circle r="3" fill="${DIAL.rim}"/></g>` + `<path class="sp-o" d="M5.66 25.1A7 7 0 0 1 -5.66 25.1" fill="none" stroke-width="2.6"/></svg>`;
-}
-
-// One coloured initial per project, the same colour for the same name.
-const TILE_COLORS = [ "#b9b0ff", "#7fdbe8", "#7fdcb8", "#ffc566", "#ff9db8" ];
-
-function tileColor(name) {
-    let h = 2166136261;
-    for (const ch of String(name == null ? "" : name)) {
-        h ^= ch.codePointAt(0);
-        h = Math.imul(h, 16777619);
-    }
-    return TILE_COLORS[(h >>> 0) % TILE_COLORS.length];
-}
-
 const initialOf = name => (String(name || "").trim().match(/[\p{L}\p{N}]/u) || [ "#" ])[0].toUpperCase();
-
-// A flat vault-door glyph for the header: ring, dial and one tick.
-const GLYPH = `<svg class="glyph" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="4.5" fill="var(--orange)" stroke="currentColor" stroke-width="1.5"/><path d="M12 7.5V5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
 
 // A titled card. Returns its body.
 function panel(parent, title, {tag: tag = ""} = {}) {
@@ -138,7 +91,7 @@ function topbar({crumb: crumb} = {}) {
         c.onclick = crumb.onClick;
         bar.appendChild(c);
     }
-    bar.appendChild(el(`<div class="wordmark">${GLYPH}<span class="wm">VAULT<span class="dot">.</span>OS</span></div>`));
+    bar.appendChild(el(`<div class="wordmark">VaultOS</div>`));
     bar.appendChild(el(`<div class="status" title="Vault unlocked"><span class="led"></span><span class="st">Unlocked</span></div>`));
     const gear = el(`<button class="iconbtn gear" title="Settings"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>`);
     gear.onclick = () => {
@@ -185,7 +138,6 @@ function renderLoading() {
 
 function renderSetup() {
     const wrap = el(`<div class="center"></div>`);
-    wrap.appendChild(el(dialSvg("dial hero")));
     wrap.appendChild(el(`<h1>Set up your vault</h1>`));
     wrap.appendChild(el(`<p>One master password encrypts everything. It stays in memory while unlocked. Optional Keychain access can be enabled later. <strong>Keep the password safe; there is no password reset.</strong></p>`));
     const pw = el(`<input type="password" placeholder="Master password" />`);
@@ -225,9 +177,7 @@ async function renderUnlock() {
     TOUCH_ID = (await window.vault.state()).touchId || TOUCH_ID;
     if (revision !== renderVersion) return;
     const wrap = el(`<div class="center"></div>`);
-    wrap.appendChild(el(dialSvg("dial hero")));
-    wrap.appendChild(el(`<div class="kicker">Welcome back. Ready when you are.</div>`));
-    wrap.appendChild(el(`<h1>VAULT<span class="dot">.</span>OS</h1>`));
+    wrap.appendChild(el(`<h1>VaultOS is locked</h1>`));
     wrap.appendChild(el(`<p>Unlock to let approved agents use your keys. Locks after 15 minutes of inactivity, when the Mac locks, or when you press Lock.</p>`));
     const pw = el(`<input type="password" placeholder="Master password" />`);
     const err = el(`<div class="err"></div>`);
@@ -340,7 +290,7 @@ async function renderProjects() {
     if (revision !== renderVersion) return;
     await refreshAgents();
     if (revision !== renderVersion) return;
-    scroll.appendChild(el(`<div class="section"><span class="label">Projects<span class="dot">.</span></span><span class="label">${projects.length}</span></div>`));
+    scroll.appendChild(el(`<div class="section"><span class="label">Projects</span><span class="label">${projects.length}</span></div>`));
     const pending = await window.vault.pending();
     if (revision !== renderVersion) return;
     if (pending.length) {
@@ -370,8 +320,14 @@ async function renderProjects() {
                 return;
             }
             approveAll.disabled = true;
-            for (const pd of pending) await human("approveInject", pd.project, pd.key, true);
-            render();
+            try {
+                await human("approveInjectAll", pending.map(pd => ({
+                    project: pd.project,
+                    key: pd.key
+                })));
+            } finally {
+                render();
+            }
         };
         acts.appendChild(approveAll);
         scroll.appendChild(banner);
@@ -412,10 +368,10 @@ async function renderProjects() {
     scroll.appendChild(addToggle);
     scroll.appendChild(addForm);
     if (!projects.length) {
-        scroll.appendChild(el(`<div class="empty">${dialSvg("dial sm")}<div class="big">No projects yet</div><p>Create one, then add its API keys. To let an agent use them, enrol it under Settings, then Agents. Reveal is off by default.</p></div>`));
+        scroll.appendChild(el(`<div class="empty"><div class="big">No projects yet</div><p>Create one, then add its API keys. To let an agent use them, enrol it under Settings, then Agents. Reveal is off by default.</p></div>`));
     }
     for (const p of projects) {
-        const row = el(`<div class="row">\n      <span class="tile" aria-hidden="true" style="background:${tileColor(p.name)}">${esc(initialOf(p.name))}</span>\n      <div class="grow"><div class="name">${esc(p.name)}</div><div class="sub">${p.secretCount} ${p.secretCount === 1 ? "key" : "keys"}</div></div>\n      <div class="chev">›</div></div>`);
+        const row = el(`<div class="row">\n      <span class="tile" aria-hidden="true">${esc(initialOf(p.name))}</span>\n      <div class="grow"><div class="name">${esc(p.name)}</div><div class="sub">${p.secretCount} ${p.secretCount === 1 ? "key" : "keys"}</div></div>\n      <div class="chev">›</div></div>`);
         row.onclick = () => {
             view = {
                 name: "project",
@@ -626,7 +582,7 @@ function renderProviderPicker(project) {
         }
     }));
     const scroll = el(`<div class="scroll"></div>`);
-    scroll.appendChild(el(`<div class="section"><span class="label">Add to ${esc(project)}<span class="dot">.</span></span></div>`));
+    scroll.appendChild(el(`<div class="section"><span class="label">Add to ${esc(project)}</span></div>`));
     scroll.appendChild(el(`<div class="note" style="margin:-4px 2px 12px">Which service is this for?</div>`));
     const grid = el(`<div class="picker-grid"></div>`);
     for (const p of PROVIDERS) {
@@ -926,7 +882,7 @@ async function renderSettings() {
     }));
     const page = el(`<div class="scroll"></div>`);
     let scroll = page;
-    page.appendChild(el(`<div class="section"><span class="label">Settings<span class="dot">.</span></span></div>`));
+    page.appendChild(el(`<div class="section"><span class="label">Settings</span></div>`));
     const s = await window.vault.getSettings();
     if (revision !== renderVersion) return;
     scroll = panel(page, "Export password");
@@ -1113,7 +1069,7 @@ async function renderAgents() {
         }
     }));
     const scroll = el(`<div class="scroll"></div>`);
-    scroll.appendChild(el(`<div class="section"><span class="label">Agents<span class="dot">.</span></span></div>`));
+    scroll.appendChild(el(`<div class="section"><span class="label">Agents</span></div>`));
     scroll.appendChild(el(`<div class="note" style="margin:0 2px 14px">Any AI tool can be enrolled: Claude Code, Codex, Cursor, a script. Each gets its own token and its own scopes. Approve specific projects and folders. Agents can add keys only with the add scope; editing your keys also requires delegation and its matching scope.</div>`));
     const list = await window.vault.agents();
     if (revision !== renderVersion) return;
@@ -1229,7 +1185,7 @@ async function renderDelegate() {
         }
     }));
     const scroll = el(`<div class="scroll"></div>`);
-    scroll.appendChild(el(`<div class="section"><span class="label">${esc(secret)}<span class="dot">.</span></span></div>`));
+    scroll.appendChild(el(`<div class="section"><span class="label">${esc(secret)}</span></div>`));
     scroll.appendChild(el(`<div class="note" style="margin:0 2px 14px">Delegating lets an agent rotate or update this key. It stays yours and stays here; you can take it back at any time.</div>`));
     const all = await window.vault.secrets(project);
     if (revision !== renderVersion) return;
@@ -1517,9 +1473,14 @@ window.addEventListener("unhandledrejection", event => {
     notice.textContent = message;
 });
 
-new MutationObserver(() => {
-    for (const input of document.querySelectorAll("input:not([aria-label]),textarea:not([aria-label]),select:not([aria-label])")) if (!input.closest("label")) input.setAttribute("aria-label", input.closest(".field")?.querySelector(".label")?.textContent || input.placeholder || input.type);
-    for (const row of document.querySelectorAll(".row:not([tabindex]),.pcard:not([tabindex]),.crumb:not([tabindex])")) {
+// Only nodes just added are checked; scanning the whole document on every change ran on each
+// keystroke in some forms.
+const within = (node, sel) => [ ...node.matches(sel) ? [ node ] : [], ...node.querySelectorAll(sel) ];
+
+new MutationObserver(mutations => {
+    const added = mutations.flatMap(m => [ ...m.addedNodes ]).filter(n => n.nodeType === 1);
+    for (const input of added.flatMap(n => within(n, "input:not([aria-label]),textarea:not([aria-label]),select:not([aria-label])"))) if (!input.closest("label")) input.setAttribute("aria-label", input.closest(".field")?.querySelector(".label")?.textContent || input.placeholder || input.type);
+    for (const row of added.flatMap(n => within(n, ".row:not([tabindex]),.pcard:not([tabindex]),.crumb:not([tabindex])"))) {
         row.tabIndex = 0;
         row.setAttribute("role", "button");
         row.onkeydown = e => {

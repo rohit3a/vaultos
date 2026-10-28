@@ -16,7 +16,7 @@ const {requestShutdown: requestShutdown, claim: claim} = require("./session");
 
 const {AutoSync: AutoSync, syncRepo: syncRepo} = require("./autosync");
 
-const {safeEqual: safeEqual} = require("./crypto");
+const {safeEqual: safeEqual, sha256: sha256} = require("./crypto");
 
 const {defaultDataDir: defaultDataDir} = require("./paths");
 
@@ -71,10 +71,20 @@ function unlockStatus() {
     });
 }
 
-const csp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+const csp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+
+// A copied value is cleared after 30 seconds, or at Lock, if it is still on the clipboard.
+// Only its digest is kept to recognise it.
+let copiedDigest = null;
+
+function clearCopied() {
+    if (copiedDigest && sha256(clipboard.readText()) === copiedDigest) clipboard.clear();
+    copiedDigest = null;
+}
 
 function lock({forget: forget = true} = {}) {
     humanUnlocked = false;
+    clearCopied();
     humanAuth.reset();
     clearTimeout(timer);
     if (forget) {
@@ -122,23 +132,45 @@ function touch() {
     if (humanUnlocked) timer = setTimeout(() => autoLock("idle"), 15 * 60 * 1e3);
 }
 
-async function own() {
-    if (release) return;
-    if (!await requestShutdown(store.sessionPath)) throw new Error("Close the other VaultOS Preview instance before unlocking");
-    release = claim(store.dataDir);
+// Two unlocks can overlap (a Touch ID prompt and a typed password, or a double submit).
+// Each waits for the one already in flight instead of claiming the vault or starting the
+// API a second time.
+let owning = null, serving = null;
+
+function own() {
+    if (release) return Promise.resolve();
+    if (!owning) owning = (async () => {
+        if (!await requestShutdown(store.sessionPath)) throw new Error("Close the other VaultOS Preview instance before unlocking");
+        if (!release) release = claim(store.dataDir);
+    })().finally(() => {
+        owning = null;
+    });
+    return owning;
 }
 
-async function serve() {
-    if (!api) {
-        autoSync = new AutoSync(store, {
+function serve() {
+    if (api) return Promise.resolve();
+    if (!serving) serving = (async () => {
+        const sync = new AutoSync(store, {
             log: m => console.error(`VaultOS Preview: ${m}`)
         });
-        api = await startApi(store, {
-            autoSync: autoSync
+        const started = await startApi(store, {
+            autoSync: sync
         });
+        // Locked while the server was starting: lock() found nothing to stop, so stop it here.
+        if (!store.isUnlocked()) {
+            started.server.close();
+            started.server.closeAllConnections();
+            return;
+        }
+        autoSync = sync;
+        api = started;
         store.writeSession(api.port, api.token);
         autoSync.start();
-    }
+    })().finally(() => {
+        serving = null;
+    });
+    return serving;
 }
 
 function handle(channel, fn, publicCall = false) {
@@ -327,9 +359,8 @@ handle("copy", async (project, key) => {
     const secret = store.revealSecret(project, key);
     const value = secret.value || secret.password;
     clipboard.writeText(value);
-    setTimeout(() => {
-        if (clipboard.readText() === value) clipboard.clear();
-    }, 3e4);
+    copiedDigest = sha256(value);
+    setTimeout(clearCopied, 3e4);
     return {
         ok: true
     };
@@ -426,6 +457,13 @@ handle("delegate", async (...args) => {
 handle("adopt", async (...args) => {
     await gate("adopt an agent's key");
     return store.adopt(...args);
+});
+
+// Approve all: one confirmation and one save. Either every listed key is approved or none is.
+handle("approveInjectAll", async items => {
+    if (!Array.isArray(items) || items.length > 5e3 || !items.every(i => i && typeof i.project === "string" && typeof i.key === "string")) throw new Error("Invalid approval list");
+    await gate("approve keys for .env");
+    return store.batch(() => items.map(i => store.approveInject(i.project, i.key, true)));
 });
 
 handle("approveInject", async (...args) => {
@@ -541,7 +579,7 @@ if (!app.requestSingleInstanceLock()) app.quit(); else {
             const relative = decodeURIComponent(u.pathname).slice(1);
             const root = path.join(__dirname, "renderer");
             const file = path.resolve(root, relative);
-            if (u.host !== "app" || !file.startsWith(root + path.sep) || !/\.(html|js|css|woff2|png)$/.test(file)) return new Response(null, {
+            if (u.host !== "app" || !file.startsWith(root + path.sep) || !/\.(html|js|css|png)$/.test(file)) return new Response(null, {
                 status: 404
             });
             try {
@@ -549,7 +587,6 @@ if (!app.requestSingleInstanceLock()) app.quit(); else {
                     ".html": "text/html",
                     ".js": "text/javascript",
                     ".css": "text/css",
-                    ".woff2": "font/woff2",
                     ".png": "image/png"
                 };
                 return new Response(fs.readFileSync(file), {

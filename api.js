@@ -180,12 +180,15 @@ function route(req, body, store, agent, agents) {
         for (const dir of [ store.dataDir, data ]) if (resolved === dir || resolved.startsWith(dir + path.sep)) deny("Vault files are not export destinations");
         return resolved;
     };
+    // One save, so the project and the agent's grant to it are kept or dropped together.
     const createProject = name => {
         scope("add");
-        const created = store.createProject(name, actor);
-        agent.projects = [ ...agent.projects || [], created.id ];
-        store.persist();
-        return created;
+        return store.batch(() => {
+            const created = store.createProject(name, actor);
+            agent.projects = [ ...agent.projects || [], created.id ];
+            store.persist();
+            return created;
+        });
     };
     const writeSecret = (proj, fields) => {
         const existing = store.findSecret(proj, fields.key);
