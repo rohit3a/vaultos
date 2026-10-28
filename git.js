@@ -1,24 +1,34 @@
 "use strict";
 
-const {execFileSync: execFileSync} = require("node:child_process");
+const {execFileSync: execFileSync, spawn: spawn} = require("node:child_process");
+
+const crypto = require("node:crypto");
 
 const fs = require("node:fs");
 
+const os = require("node:os");
+
 const path = require("node:path");
+
+const GIT_ENV = {
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_ASKPASS: "/bin/true",
+    SSH_ASKPASS: "/bin/true"
+};
+
+const gitArgs = (repo, args) => [ "--literal-pathspecs", "-c", "core.hooksPath=/dev/null", "-C", repo, ...args ];
 
 // Every path VaultOS hands Git is a file or folder name, never a pattern. Without
 // --literal-pathspecs a stray file named `records/*` would match every record.
 function git(repo, args, {timeout: timeout = 6e4} = {}) {
     try {
-        const stdout = execFileSync("git", [ "--literal-pathspecs", "-c", "core.hooksPath=/dev/null", "-C", repo, ...args ], {
+        const stdout = execFileSync("git", gitArgs(repo, args), {
             encoding: "utf8",
             timeout: timeout,
             stdio: [ "ignore", "pipe", "pipe" ],
             env: {
                 ...process.env,
-                GIT_TERMINAL_PROMPT: "0",
-                GIT_ASKPASS: "/bin/true",
-                SSH_ASKPASS: "/bin/true"
+                ...GIT_ENV
             }
         });
         return {
@@ -35,9 +45,88 @@ function git(repo, args, {timeout: timeout = 6e4} = {}) {
     }
 }
 
+// Fetch and push wait on the network, often for seconds over SSH. They run without blocking,
+// so the owning process (in the desktop app, the one that draws the window) stays responsive.
+// Local Git commands take milliseconds and keep the synchronous runner above.
+function gitAsync(repo, args, {timeout: timeout = 6e4, env: env = {}} = {}) {
+    return new Promise(resolve => {
+        const out = [], err = [];
+        let settled = false;
+        const finish = (code, error) => {
+            if (settled) return;
+            settled = true;
+            const stdout = Buffer.concat(out).toString("utf8"), stderr = Buffer.concat(err).toString("utf8");
+            if (code === 0 && !error) return resolve({
+                ok: true,
+                out: stdout.trimEnd()
+            });
+            const message = [ stderr, stdout, error ? error.message : `git exited with ${code}` ].filter(Boolean).join(" ").trim();
+            resolve({
+                ok: false,
+                out: "",
+                error: message.split("\n").slice(0, 4).join(" ")
+            });
+        };
+        const child = spawn("git", gitArgs(repo, args), {
+            timeout: timeout,
+            stdio: [ "ignore", "pipe", "pipe" ],
+            env: {
+                ...process.env,
+                ...GIT_ENV,
+                ...env
+            }
+        });
+        child.stdout.on("data", d => out.push(d));
+        child.stderr.on("data", d => err.push(d));
+        child.on("error", e => finish(null, e));
+        child.on("close", (code, signal) => finish(code, signal ? new Error(`git stopped by ${signal}; the remote may have timed out`) : null));
+        // A persisted SSH master may hold an inherited pipe open after git itself has exited.
+        child.on("exit", code => setTimeout(() => finish(code), 2e3).unref());
+    });
+}
+
+// One sync round fetches, pushes and fetches again to verify the push. Over SSH each of those
+// was a separate handshake. A private control socket per remote lets them share one connection,
+// and keeps it for a few minutes so the next autosync round reuses it too. Anything the user
+// configured for SSH wins, and an unsafe socket directory turns reuse off rather than risking it.
+function sshReuseEnv(repo, remote) {
+    if (process.platform === "win32" || typeof process.getuid !== "function") return {};
+    if (process.env.GIT_SSH_COMMAND || process.env.GIT_SSH) return {};
+    const configured = git(repo, [ "config", "--get", "core.sshCommand" ]);
+    if (configured.ok && configured.out) return {};
+    const url = git(repo, [ "remote", "get-url", remote ]);
+    if (!url.ok || !url.out) return {};
+    const dir = path.join(os.tmpdir(), `vaultos-ssh-${process.getuid()}`);
+    if (!/^[A-Za-z0-9._\/-]+$/.test(dir)) return {};
+    try {
+        fs.mkdirSync(dir, {
+            mode: 448
+        });
+    } catch (e) {
+        if (e.code !== "EEXIST") return {};
+    }
+    try {
+        const st = fs.lstatSync(dir);
+        if (!st.isDirectory() || st.uid !== process.getuid() || (st.mode & 63) !== 0) return {};
+    } catch {
+        return {};
+    }
+    const socket = path.join(dir, crypto.createHash("sha256").update(url.out, "utf8").digest("hex").slice(0, 16));
+    return {
+        GIT_SSH_COMMAND: `ssh -o ControlMaster=auto -o ControlPersist=300 -o ControlPath=${socket}`
+    };
+}
+
 class GitRepo {
     constructor(dir) {
         this.dir = dir;
+    }
+    sshEnv(remote) {
+        if (!this.ssh || this.ssh.remote !== remote) this.ssh = {
+            remote: remote,
+            env: sshReuseEnv(this.dir, remote)
+        };
+        return this.ssh.env;
     }
     isRepo() {
         return fs.existsSync(path.join(this.dir, ".git"));
@@ -93,14 +182,16 @@ class GitRepo {
             files: r.out.split("\0").filter(Boolean).map(entry => entry.slice(3))
         };
     }
-    fetch() {
+    async fetch() {
         const remote = this.remoteName();
         if (!remote) return {
             ok: false,
             error: "no git remote configured",
             code: "NO_REMOTE"
         };
-        const r = git(this.dir, [ "fetch", "--quiet", remote ]);
+        const r = await gitAsync(this.dir, [ "fetch", "--quiet", remote ], {
+            env: this.sshEnv(remote)
+        });
         if (!r.ok) return {
             ok: false,
             error: r.error,
@@ -211,16 +302,19 @@ class GitRepo {
             error: r.error
         };
     }
-    push() {
+    async push() {
         const branch = this.branch(), remote = this.remoteName();
         if (!remote) return {
             ok: false,
             error: "no git remote configured",
             code: "NO_REMOTE"
         };
-        let r = git(this.dir, [ "push", remote, `HEAD:${branch}` ]);
+        const env = this.sshEnv(remote);
+        let r = await gitAsync(this.dir, [ "push", remote, `HEAD:${branch}` ], {
+            env: env
+        });
         if (!r.ok) {
-            const f = this.fetch();
+            const f = await this.fetch();
             if (!f.ok) return {
                 ok: false,
                 error: f.error,
@@ -232,14 +326,18 @@ class GitRepo {
                 error: rb.error,
                 code: rb.code
             };
-            r = git(this.dir, [ "push", remote, `HEAD:${branch}` ]);
+            r = await gitAsync(this.dir, [ "push", remote, `HEAD:${branch}` ], {
+                env: env
+            });
         }
         if (!r.ok) return {
             ok: false,
             error: r.error,
             code: "PUSH_REJECTED"
         };
-        const readback = git(this.dir, [ "fetch", "--quiet", remote ]);
+        const readback = await gitAsync(this.dir, [ "fetch", "--quiet", remote ], {
+            env: env
+        });
         if (!readback.ok || this.remoteHead() !== this.head()) return {
             ok: false,
             error: "Could not verify remote receipt",
@@ -250,8 +348,8 @@ class GitRepo {
             remoteSha: this.remoteHead()
         };
     }
-    pullFF() {
-        const f = this.fetch();
+    async pullFF() {
+        const f = await this.fetch();
         if (!f.ok) return f;
         const div = this.divergence();
         if (!div.ok) return {
@@ -295,5 +393,6 @@ class GitRepo {
 }
 
 module.exports = {
-    GitRepo: GitRepo
+    GitRepo: GitRepo,
+    sshReuseEnv: sshReuseEnv
 };

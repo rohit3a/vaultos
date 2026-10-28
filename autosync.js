@@ -42,6 +42,7 @@ class AutoSync {
         this.unsubscribe = null;
         this.started = false;
         this.running = false;
+        this.rerun = false;
         this.halted = false;
         this.commitFailures = 0;
         this.state = {
@@ -74,9 +75,10 @@ class AutoSync {
         return this;
     }
     start() {
-        // Persists made by sync itself happen while running and are ignored.
+        // A write during a round (sync's own, or one made while git waits on the network)
+        // schedules one more round after it instead of starting a second one alongside.
         if (!this.unsubscribe) this.unsubscribe = this.store.onPersist(() => {
-            if (!this.running) this.soon();
+            if (this.running) this.rerun = true; else this.soon();
         });
         this.started = true;
         return this.refresh();
@@ -89,7 +91,7 @@ class AutoSync {
         if (!this.settings().enabled) return idle ? this.set("DISABLED") : this;
         if (this.halted) return this;
         if (!this.configured()) return this.set("NOT_CONFIGURED", "Initialize Git sync on this device first");
-        this.timer = setInterval(() => this.run(), this.intervalMs());
+        this.timer = setInterval(() => this.tick(), this.intervalMs());
         this.timer.unref();
         if (idle) this.set("SCHEDULED");
         this.soon(this.startDelayMs);
@@ -119,7 +121,7 @@ class AutoSync {
     soon(delay = this.debounceMs) {
         if (!this.timer) return;
         clearTimeout(this.soonTimer);
-        this.soonTimer = setTimeout(() => this.run(), delay);
+        this.soonTimer = setTimeout(() => this.tick(), delay);
         this.soonTimer.unref();
     }
     halt(state, error) {
@@ -138,9 +140,13 @@ class AutoSync {
         this.commitFailures = code === "COMMIT_FAILED" ? this.commitFailures + 1 : 0;
         return TRANSIENT.has(code) || code === "COMMIT_FAILED" && this.commitFailures < COMMIT_ATTEMPTS;
     }
-    // One pull-then-push round. Git and age run synchronously, so nothing else in this
-    // process (including another round or a vault write) interleaves with it.
-    run({manual: manual = false} = {}) {
+    tick() {
+        this.run().catch(e => this.log(`autosync round failed: ${firstLine(e.message)}`));
+    }
+    // One pull-then-push round. Fetch and push run asynchronously, so vault writes can happen
+    // while they wait on the network; the local merge and record encryption still run in one
+    // synchronous step each, and Sync runs one remote operation per repository at a time.
+    async run({manual: manual = false} = {}) {
         if (this.running) return this.status();
         if (!this.store.isUnlocked()) {
             if (manual) throw Object.assign(new Error("Vault is locked"), {
@@ -162,8 +168,8 @@ class AutoSync {
                 state: "VAULT_BUSY"
             });
             const sync = new Sync(this.store, this.repo);
-            const pulled = sync.pullRemote();
-            const pushed = sync.pushRemote({
+            const pulled = await sync.pullRemote();
+            const pushed = await sync.pushRemote({
                 message: `autosync from ${sync.machineId()}`
             });
             const problems = sync.peerProblems();
@@ -187,6 +193,14 @@ class AutoSync {
             if (failure && !retried) this.halt(failure, this.state.error); else if (manual && wasHalted) this.refresh();
             if (pulled.added.length || pulled.updated.length || pulled.deleted.length || pushed.written) this.log(`synced: +${pulled.added.length} ~${pulled.updated.length} -${pulled.deleted.length} in, ${pushed.written || 0} out`);
         } catch (e) {
+            if (!this.store.isUnlocked()) {
+                this.state = {
+                    ...this.state,
+                    state: "PAUSED_LOCKED",
+                    lastAttemptAt: attemptAt
+                };
+                return this.status();
+            }
             const state = e.state || e.code || "ERROR";
             this.state = {
                 ...this.state,
@@ -198,6 +212,10 @@ class AutoSync {
             if (this.retry(state)) this.log(`sync failed: ${this.state.error}`); else this.halt(state, this.state.error);
         } finally {
             this.running = false;
+            if (this.rerun) {
+                this.rerun = false;
+                this.soon();
+            }
         }
         return this.status();
     }

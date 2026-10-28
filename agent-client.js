@@ -188,8 +188,8 @@ class VaultClient {
             return null;
         }
     }
-    // An owner busy with a sync round (git and age run synchronously, up to the git timeout)
-    // cannot answer /status. While the process named in the session file is alive, keep
+    // An owner busy with a long synchronous step (unlock, or decrypting many sync records with
+    // age) cannot answer /status. While the process named in the session file is alive, keep
     // waiting for it instead of reporting it as not running or starting a second backend.
     async waitForBusyOwner() {
         const session = readSession(this.sessionPath);

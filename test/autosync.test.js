@@ -19,7 +19,7 @@ async function until(fn, ms = 2e4) {
 }
 
 // Two devices with separate checkouts of one bare remote, enrolled and trusting each other.
-function gitPair(t) {
+async function gitPair(t) {
     const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "vaultos-autosync-test-"));
     t.after(() => fs.rmSync(dir, {
         recursive: true,
@@ -46,16 +46,16 @@ function gitPair(t) {
     identity(repoA);
     git("-C", repoA, "remote", "add", "origin", remote);
     const sa = new Sync(a, repoA), ia = sa.init("Machine A");
-    assert(sa.pushRemote().delivered);
+    assert((await sa.pushRemote()).delivered);
     git("clone", "--quiet", remote, repoB);
     identity(repoB);
     const sb = new Sync(b, repoB), ib = sb.init("Machine B");
     sa.trustMachine(ib);
     sb.trustMachine(ia);
-    assert(sb.pushRemote().delivered);
-    sa.pullRemote();
-    assert(sa.pushRemote().delivered);
-    sb.pullRemote();
+    assert((await sb.pushRemote()).delivered);
+    await sa.pullRemote();
+    assert((await sa.pushRemote()).delivered);
+    await sb.pullRemote();
     return {
         a: a,
         b: b,
@@ -78,7 +78,7 @@ function counted(auto) {
     return auto;
 }
 
-test("autosync is off by default and validates its settings", t => {
+test("autosync is off by default and validates its settings", async t => {
     const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "vaultos-autosync-settings-"));
     t.after(() => fs.rmSync(dir, {
         recursive: true,
@@ -123,14 +123,14 @@ test("autosync is off by default and validates its settings", t => {
         repo: path.join(dir, "no-repo")
     }).start();
     assert.equal(auto.status().state, "NOT_CONFIGURED");
-    assert.throws(() => auto.run({
+    await assert.rejects(auto.run({
         manual: true
     }), /not initialized/);
     auto.stop();
 });
 
 test("autosync pushes once, debounced, after local changes and pulls on its interval", async t => {
-    const {a: a, b: b, sb: sb, repoA: repoA, repoB: repoB} = gitPair(t);
+    const {a: a, b: b, sb: sb, repoA: repoA, repoB: repoB} = await gitPair(t);
     a.setSettings({
         autoSync: {
             enabled: true
@@ -173,7 +173,9 @@ test("autosync pushes once, debounced, after local changes and pulls on its inte
     assert.equal(autoA.status().sent, 2);
     assert(autoA.status().lastSyncAt);
     autoB.start();
-    await until(() => b.findProject("Example") && b.listSecrets("Example").length === 2);
+    // Pulled records land before the round's push finishes, so wait for the round itself.
+    await until(() => autoB.status().received?.added === 2);
+    assert.equal(b.listSecrets("Example").length, 2);
     assert(autoB.runs >= 1);
     assert.equal(b.revealSecret("Example", "SECOND").value, "synthetic-two");
     assert.equal(autoB.status().received.added, 2);
@@ -181,7 +183,7 @@ test("autosync pushes once, debounced, after local changes and pulls on its inte
 });
 
 test("autosync pauses while the vault is locked and resumes after unlock", async t => {
-    const {a: a, repoA: repoA} = gitPair(t);
+    const {a: a, repoA: repoA} = await gitPair(t);
     a.setSettings({
         autoSync: {
             enabled: true
@@ -201,8 +203,8 @@ test("autosync pauses while the vault is locked and resumes after unlock", async
     assert.equal(auto.status().state, "PAUSED_LOCKED");
     await sleep(600);
     assert.equal(auto.runs, runs);
-    assert.equal(auto.run().lastAttemptAt, attempted);
-    assert.throws(() => auto.run({
+    assert.equal((await auto.run()).lastAttemptAt, attempted);
+    await assert.rejects(auto.run({
         manual: true
     }), /locked/);
     a.unlock("synthetic-password-a");
@@ -212,14 +214,14 @@ test("autosync pauses while the vault is locked and resumes after unlock", async
 });
 
 test("autosync halts on a conflict, publishes nothing and leaves resolution to a human", async t => {
-    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA} = gitPair(t);
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA} = await gitPair(t);
     a.createProject("Example");
     a.setSecret("Example", {
         key: "KEY",
         value: "base"
     });
-    assert(sa.pushRemote().delivered);
-    sb.pullRemote();
+    assert((await sa.pushRemote()).delivered);
+    await sb.pullRemote();
     b.setSecret("Example", {
         key: "KEY",
         value: "right"
@@ -228,7 +230,7 @@ test("autosync halts on a conflict, publishes nothing and leaves resolution to a
         key: "KEY",
         value: "right-again"
     });
-    assert(sb.pushRemote().delivered);
+    assert((await sb.pushRemote()).delivered);
     a.setSettings({
         autoSync: {
             enabled: true
@@ -255,7 +257,7 @@ test("autosync halts on a conflict, publishes nothing and leaves resolution to a
     await sleep(500);
     assert.equal(auto.runs, runs);
     assert.equal(a.revealSecret("Example", "KEY").value, "left");
-    sb.pullRemote();
+    await sb.pullRemote();
     assert.equal(b.revealSecret("Example", "KEY").value, "right-again");
     // An owner-requested sync runs the same gated round: still refused, still halted.
     const api = await startApi(a, {
@@ -276,7 +278,7 @@ test("autosync halts on a conflict, publishes nothing and leaves resolution to a
     assert.equal(body.ok, false);
     assert.equal(body.state, "CONFLICTS_PENDING");
     assert.equal(a.revealSecret("Example", "KEY").value, "left");
-    sa.pullRemote({
+    await sa.pullRemote({
         acceptConflicts: true
     });
     auto.clearHalt();
@@ -285,15 +287,15 @@ test("autosync halts on a conflict, publishes nothing and leaves resolution to a
     assert.equal(a.revealSecret("Example", "KEY").value, "right-again");
 });
 
-test("concurrent pushes from both devices rebase and deliver both records", t => {
-    const {a: a, b: b, sa: sa, sb: sb} = gitPair(t);
+test("concurrent pushes from both devices rebase and deliver both records", async t => {
+    const {a: a, b: b, sa: sa, sb: sb} = await gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "BASE",
         value: "synthetic-base"
     });
-    assert(sa.pushRemote().delivered);
-    sb.pullRemote();
+    assert((await sa.pushRemote()).delivered);
+    await sb.pullRemote();
     a.setSecret("Shared", {
         key: "FROM_A",
         value: "synthetic-a"
@@ -302,31 +304,31 @@ test("concurrent pushes from both devices rebase and deliver both records", t =>
         key: "FROM_B",
         value: "synthetic-b"
     });
-    assert(sa.pushRemote().delivered);
-    const pushed = sb.pushRemote();
+    assert((await sa.pushRemote()).delivered);
+    const pushed = await sb.pushRemote();
     assert(pushed.delivered, JSON.stringify(pushed));
     assert.equal(pushed.rebased, true);
-    sa.pullRemote();
-    sb.pullRemote();
+    await sa.pullRemote();
+    await sb.pullRemote();
     for (const store of [ a, b ]) assert.deepEqual(store.listSecrets("Shared").map(s => s.key).sort(), [ "BASE", "FROM_A", "FROM_B" ]);
-    assert.equal(sa.statusRemote().state, "IN_SYNC");
+    assert.equal((await sa.statusRemote()).state, "IN_SYNC");
 });
 
-test("a peer whose signed heartbeat is older than 48 hours is reported as stalled", t => {
-    const {a: a, sa: sa, repoA: repoA} = gitPair(t);
-    assert.equal(sa.statusRemote().state, "IN_SYNC");
+test("a peer whose signed heartbeat is older than 48 hours is reported as stalled", async t => {
+    const {a: a, sa: sa, repoA: repoA} = await gitPair(t);
+    assert.equal((await sa.statusRemote()).state, "IN_SYNC");
     assert.deepEqual(sa.peerProblems(), []);
     t.mock.timers.enable({
         apis: [ "Date" ],
         now: Date.now() + 49 * 36e5
     });
-    const status = sa.statusRemote();
+    const status = await sa.statusRemote();
     assert.equal(status.state, "PEER_STALLED");
     assert.match(status.detail, /Machine B has not reported for 49h/);
     const auto = new AutoSync(a, {
         repo: repoA
     });
-    const round = auto.run({
+    const round = await auto.run({
         manual: true
     });
     assert.equal(round.state, "OK");
@@ -354,8 +356,8 @@ function autosyncFor(store, repo) {
     });
 }
 
-test("a round commits what an earlier round left uncommitted, so it can rebase onto the peer", t => {
-    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, git: git} = gitPair(t);
+test("a round commits what an earlier round left uncommitted, so it can rebase onto the peer", async t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, git: git} = await gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "FROM_A",
@@ -367,32 +369,32 @@ test("a round commits what an earlier round left uncommitted, so it can rebase o
         key: "FROM_B",
         value: "synthetic-b"
     });
-    assert(sb.pushRemote().delivered);
+    assert((await sb.pushRemote()).delivered);
     assert.match(git("-C", repoA, "status", "--porcelain"), new RegExp(`manifests/${sa.machineId()}\\.json`));
     // Git will not rebase over the uncommitted manifest; this halted every later round.
-    assert.equal(sa.git.pullFF().code, "LOCAL_SYNC_REPO_DIRTY");
-    const round = autosyncFor(a, repoA).run();
+    assert.equal((await sa.git.pullFF()).code, "LOCAL_SYNC_REPO_DIRTY");
+    const round = await autosyncFor(a, repoA).run();
     assert.equal(round.state, "OK", round.error);
     assert.equal(round.halted, false);
     assert.equal(git("-C", repoA, "status", "--porcelain"), "");
     assert.equal(a.revealSecret("Other", "FROM_B").value, "synthetic-b");
-    sb.pullRemote();
+    await sb.pullRemote();
     assert.equal(b.revealSecret("Shared", "FROM_A").value, "synthetic-a");
-    assert.equal(sa.statusRemote().state, "IN_SYNC");
+    assert.equal((await sa.statusRemote()).state, "IN_SYNC");
 });
 
-test("a commit refused over another staged file is retried, and the next round delivers", t => {
-    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, git: git} = gitPair(t);
+test("a commit refused over another staged file is retried, and the next round delivers", async t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, git: git} = await gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "FROM_A",
         value: "synthetic-a"
     });
-    sa.pullRemote();
+    await sa.pullRemote();
     // This machine's heartbeat is staged when the round comes to commit its records.
     sa.publishHeartbeat();
     git("-C", repoA, "add", "--", `peers/${sa.machineId()}.json`);
-    const refused = sa.pushRemote();
+    const refused = await sa.pushRemote();
     assert.equal(refused.delivered, false);
     assert.equal(refused.code, "COMMIT_FAILED");
     assert.match(refused.error, /^Unrelated staged files; refusing to commit: peers\//);
@@ -404,16 +406,16 @@ test("a commit refused over another staged file is retried, and the next round d
         key: "FROM_B",
         value: "synthetic-b"
     });
-    assert(sb.pushRemote().delivered);
-    const round = autosyncFor(a, repoA).run();
+    assert((await sb.pushRemote()).delivered);
+    const round = await autosyncFor(a, repoA).run();
     assert.equal(round.state, "OK", round.error);
     assert.equal(git("-C", repoA, "status", "--porcelain"), "");
-    sb.pullRemote();
+    await sb.pullRemote();
     assert.equal(b.revealSecret("Shared", "FROM_A").value, "synthetic-a");
 });
 
-test("a failed commit unstages what it staged, and autosync retries instead of halting", t => {
-    const {a: a, b: b, sb: sb, repoA: repoA, git: git} = gitPair(t);
+test("a failed commit unstages what it staged, and autosync retries instead of halting", async t => {
+    const {a: a, b: b, sb: sb, repoA: repoA, git: git} = await gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "FROM_A",
@@ -423,7 +425,7 @@ test("a failed commit unstages what it staged, and autosync retries instead of h
     const lock = path.join(repoA, ".git", "refs", "heads", "main.lock");
     fs.writeFileSync(lock, "");
     const auto = autosyncFor(a, repoA);
-    const failed = auto.run();
+    const failed = await auto.run();
     assert.equal(failed.state, "PUSH_NOT_DELIVERED");
     assert.equal(failed.halted, false);
     assert.match(failed.error, /main\.lock/);
@@ -436,16 +438,16 @@ test("a failed commit unstages what it staged, and autosync retries instead of h
         key: "FROM_B",
         value: "synthetic-b"
     });
-    assert(sb.pushRemote().delivered);
-    const round = auto.run();
+    assert((await sb.pushRemote()).delivered);
+    const round = await auto.run();
     assert.equal(round.state, "OK", round.error);
     assert.equal(git("-C", repoA, "status", "--porcelain"), "");
-    sb.pullRemote();
+    await sb.pullRemote();
     assert.equal(b.revealSecret("Shared", "FROM_A").value, "synthetic-a");
 });
 
-test("a round waits for another process that is still saving the vault, and does not halt", t => {
-    const {a: a, b: b, sb: sb, repoA: repoA} = gitPair(t);
+test("a round waits for another process that is still saving the vault, and does not halt", async t => {
+    const {a: a, b: b, sb: sb, repoA: repoA} = await gitPair(t);
     const auto = autosyncFor(a, repoA);
     const other = new Store(a.dataDir);
     other.unlock("synthetic-password-a");
@@ -458,19 +460,19 @@ test("a round waits for another process that is still saving the vault, and does
     // lock. A live pid that is not this process stands in for it.
     const lock = path.join(a.dataDir, "write.lock");
     fs.writeFileSync(lock, String(process.ppid));
-    const waiting = auto.run();
+    const waiting = await auto.run();
     assert.equal(waiting.state, "VAULT_BUSY");
     assert.equal(waiting.halted, false);
     assert(!a.readAudit().some(e => e.action === "sync_halted"));
     fs.unlinkSync(lock);
-    const round = auto.run();
+    const round = await auto.run();
     assert.equal(round.state, "OK", round.error);
-    sb.pullRemote();
+    await sb.pullRemote();
     assert.equal(b.revealSecret("Saved elsewhere", "OTHER").value, "synthetic-other");
 });
 
-test("a commit that keeps failing halts after three rounds, with Git's reason in the activity log", t => {
-    const {a: a, repoA: repoA, git: git} = gitPair(t);
+test("a commit that keeps failing halts after three rounds, with Git's reason in the activity log", async t => {
+    const {a: a, repoA: repoA, git: git} = await gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "FROM_A",
@@ -481,17 +483,17 @@ test("a commit that keeps failing halts after three rounds, with Git's reason in
     fs.writeFileSync(lock, "");
     const auto = autosyncFor(a, repoA);
     for (const round of [ 1, 2 ]) {
-        const failed = auto.run();
+        const failed = await auto.run();
         assert.equal(failed.halted, false, `round ${round}`);
         assert.match(failed.error, /index\.lock/);
     }
-    const halted = auto.run();
+    const halted = await auto.run();
     assert.equal(halted.halted, true);
     assert.equal(halted.state, "COMMIT_FAILED");
     assert(a.readAudit().some(e => e.actor === "autosync" && e.action === "sync_halted" && /^COMMIT_FAILED: .*index\.lock/.test(e.detail)));
-    assert.equal(auto.run().lastAttemptAt, halted.lastAttemptAt);
+    assert.equal((await auto.run()).lastAttemptAt, halted.lastAttemptAt);
     fs.unlinkSync(lock);
-    const round = auto.run({
+    const round = await auto.run({
         manual: true
     });
     assert.equal(round.state, "OK", round.error);
@@ -499,15 +501,15 @@ test("a commit that keeps failing halts after three rounds, with Git's reason in
     assert.equal(git("-C", repoA, "status", "--porcelain"), "");
 });
 
-test("a round still halts when both machines changed the same record, and discards neither", t => {
-    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, remote: remote, git: git} = gitPair(t);
+test("a round still halts when both machines changed the same record, and discards neither", async t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, remote: remote, git: git} = await gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "KEY",
         value: "synthetic-base"
     });
-    assert(sa.pushRemote().delivered);
-    sb.pullRemote();
+    assert((await sa.pushRemote()).delivered);
+    await sb.pullRemote();
     a.setSecret("Shared", {
         key: "KEY",
         value: "synthetic-from-a"
@@ -517,9 +519,9 @@ test("a round still halts when both machines changed the same record, and discar
         key: "KEY",
         value: "synthetic-from-b"
     });
-    assert(sb.pushRemote().delivered);
+    assert((await sb.pushRemote()).delivered);
     const remoteHead = git("--git-dir", remote, "rev-parse", "main");
-    const round = autosyncFor(a, repoA).run();
+    const round = await autosyncFor(a, repoA).run();
     assert.equal(round.state, "GIT_HISTORY_DIVERGED");
     assert.equal(round.halted, true);
     assert(a.readAudit().some(e => e.actor === "autosync" && e.action === "sync_halted" && e.detail.startsWith("GIT_HISTORY_DIVERGED")));
@@ -530,8 +532,8 @@ test("a round still halts when both machines changed the same record, and discar
     assert.equal(a.revealSecret("Shared", "KEY").value, "synthetic-from-a");
 });
 
-test("leftovers that fail verification stay uncommitted, and the round halts", t => {
-    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, remote: remote, git: git} = gitPair(t);
+test("leftovers that fail verification stay uncommitted, and the round halts", async t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, remote: remote, git: git} = await gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "FROM_A",
@@ -546,9 +548,9 @@ test("leftovers that fail verification stay uncommitted, and the round halts", t
         key: "FROM_B",
         value: "synthetic-b"
     });
-    assert(sb.pushRemote().delivered);
+    assert((await sb.pushRemote()).delivered);
     const before = git("-C", repoA, "status", "--porcelain"), remoteHead = git("--git-dir", remote, "rev-parse", "main");
-    const round = autosyncFor(a, repoA).run();
+    const round = await autosyncFor(a, repoA).run();
     assert.equal(round.halted, true);
     assert.equal(round.state, "SIGNATURE_INVALID");
     assert.match(round.error, /^refusing to pull: .*ciphertext/);
@@ -557,55 +559,55 @@ test("leftovers that fail verification stay uncommitted, and the round halts", t
     assert.equal(git("--git-dir", remote, "rev-parse", "main"), remoteHead);
 });
 
-test("leftovers do not carry a round past tampered ciphertext from a peer", t => {
-    const {a: a, sa: sa, sb: sb, repoA: repoA, repoB: repoB, remote: remote, git: git} = gitPair(t);
+test("leftovers do not carry a round past tampered ciphertext from a peer", async t => {
+    const {a: a, sa: sa, sb: sb, repoA: repoA, repoB: repoB, remote: remote, git: git} = await gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "FROM_A",
         value: "synthetic-a"
     });
-    assert(sa.pushRemote().delivered);
-    sb.pullRemote();
+    assert((await sa.pushRemote()).delivered);
+    await sb.pullRemote();
     const record = fs.readdirSync(path.join(repoB, "records"))[0];
     fs.writeFileSync(path.join(repoB, "records", record), "tampered");
     git("-C", repoB, "commit", "--quiet", "-am", "tamper");
     git("-C", repoB, "push", "--quiet", "origin", "HEAD:main");
     leaveRoundUncommitted(sa);
     const remoteHead = git("--git-dir", remote, "rev-parse", "main");
-    const round = autosyncFor(a, repoA).run();
+    const round = await autosyncFor(a, repoA).run();
     assert.equal(round.halted, true);
     assert.match(round.error, /refusing to pull/);
     assert.equal(git("--git-dir", remote, "rev-parse", "main"), remoteHead);
     assert.equal(a.revealSecret("Shared", "FROM_A").value, "synthetic-a");
 });
 
-test("leftovers do not carry a round past records this machine cannot decrypt", t => {
-    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, repoB: repoB, remote: remote, git: git} = gitPair(t);
+test("leftovers do not carry a round past records this machine cannot decrypt", async t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, repoB: repoB, remote: remote, git: git} = await gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "FROM_A",
         value: "synthetic-a"
     });
-    assert(sa.pushRemote().delivered);
-    sb.pullRemote();
+    assert((await sa.pushRemote()).delivered);
+    await sb.pullRemote();
     // B re-encrypts every record for itself alone.
     fs.writeFileSync(path.join(repoB, "recipients.txt"), `# Machine B\n${sb.identity().agePublicKey}\n`);
     b.setSecret("Shared", {
         key: "FROM_B",
         value: "synthetic-b"
     });
-    assert(sb.pushRemote().delivered);
+    assert((await sb.pushRemote()).delivered);
     leaveRoundUncommitted(sa);
     const remoteHead = git("--git-dir", remote, "rev-parse", "main");
-    const round = autosyncFor(a, repoA).run();
+    const round = await autosyncFor(a, repoA).run();
     assert.equal(round.state, "UNREADABLE_RECORDS");
     assert.equal(round.halted, true);
     assert.equal(git("--git-dir", remote, "rev-parse", "main"), remoteHead);
     assert.throws(() => a.revealSecret("Shared", "FROM_B"));
 });
 
-test("files sync did not write are never committed, read or deleted, and halt neither device", t => {
-    const {a: a, b: b, sa: sa, repoA: repoA, repoB: repoB, remote: remote, git: git} = gitPair(t);
+test("files sync did not write are never committed, read or deleted, and halt neither device", async t => {
+    const {a: a, b: b, sa: sa, repoA: repoA, repoB: repoB, remote: remote, git: git} = await gitPair(t);
     a.createProject("Example");
     a.setSecret("Example", {
         key: "KEY",
@@ -621,13 +623,13 @@ test("files sync did not write are never committed, read or deleted, and halt ne
         for (const f of strays) fs.writeFileSync(path.join(repoA, f), "not ciphertext");
         return wrote;
     };
-    sa.pullRemote();
-    assert(sa.pushRemote().delivered);
+    await sa.pullRemote();
+    assert((await sa.pushRemote()).delivered);
     sa.push = push;
     const autoB = new AutoSync(b, {
         repo: repoB
     });
-    const roundB = autoB.run({
+    const roundB = await autoB.run({
         manual: true
     });
     assert.deepEqual({
@@ -645,7 +647,7 @@ test("files sync did not write are never committed, read or deleted, and halt ne
         key: "SECOND",
         value: "synthetic-second"
     });
-    const roundA = new AutoSync(a, {
+    const roundA = await new AutoSync(a, {
         repo: repoA
     }).run({
         manual: true
@@ -657,24 +659,24 @@ test("files sync did not write are never committed, read or deleted, and halt ne
         state: "OK",
         error: null
     });
-    const roundB2 = autoB.run({
+    const roundB2 = await autoB.run({
         manual: true
     });
     assert.equal(roundB2.state, "OK");
     assert.equal(b.revealSecret("Example", "SECOND").value, "synthetic-second");
     // Nor do they count as records waiting to be sent, here or in the heartbeat B reads.
     assert.deepEqual(roundB2.peerProblems, []);
-    assert.deepEqual(sa.statusRemote().uncommittedFiles, []);
+    assert.deepEqual((await sa.statusRemote()).uncommittedFiles, []);
     // A record sync removes is still committed as removed.
     a.deleteSecret("Example", "SECOND");
-    assert.equal(new AutoSync(a, {
+    assert.equal((await new AutoSync(a, {
         repo: repoA
     }).run({
         manual: true
-    }).state, "OK");
-    assert.equal(autoB.run({
+    })).state, "OK");
+    assert.equal((await autoB.run({
         manual: true
-    }).state, "OK");
+    })).state, "OK");
     assert.deepEqual(b.listSecrets("Example").map(s => s.key), [ "KEY" ]);
     const published = git("--git-dir", remote, "log", "--format=", "--name-only").split("\n");
     for (const f of strays) {
@@ -683,8 +685,8 @@ test("files sync did not write are never committed, read or deleted, and halt ne
     }
 });
 
-test("a file sync did not write is refused once it arrives in a commit", t => {
-    const {sa: sa, repoA: repoA, repoB: repoB, git: git} = gitPair(t);
+test("a file sync did not write is refused once it arrives in a commit", async t => {
+    const {sa: sa, repoA: repoA, repoB: repoB, git: git} = await gitPair(t);
     // An untracked file with a record's name is still checked like any record.
     const forged = path.join(repoA, "records", "f".repeat(64) + ".age");
     fs.writeFileSync(forged, "not signed");
@@ -697,49 +699,49 @@ test("a file sync did not write is refused once it arrives in a commit", t => {
     git("-C", repoB, "add", "records/.DS_Store", "tombstones/nested/file");
     git("-C", repoB, "commit", "--quiet", "-m", "stray files");
     git("-C", repoB, "push", "--quiet", "origin", "main");
-    assert.throws(() => sa.pullRemote(), /refusing to pull/);
+    await assert.rejects(sa.pullRemote(), /refusing to pull/);
     assert.deepEqual(sa.verifyManifests().problems, [ 'Unexpected file in the sync repository: "records/.DS_Store"', 'Unexpected file in the sync repository: "tombstones/nested"' ]);
 });
 
-test("the next push takes stray files Git already tracks out of the repository and keeps the local copies", t => {
-    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, repoB: repoB, remote: remote, git: git} = gitPair(t);
+test("the next push takes stray files Git already tracks out of the repository and keeps the local copies", async t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, repoB: repoB, remote: remote, git: git} = await gitPair(t);
     a.createProject("Example");
     a.setSecret("Example", {
         key: "KEY",
         value: "synthetic-stray"
     });
-    assert(sa.pushRemote().delivered);
-    sb.pullRemote();
+    assert((await sa.pushRemote()).delivered);
+    await sb.pullRemote();
     // Committed by hand, or by an older version that ran `git add` on whole folders.
     const strays = [ "records/.DS_Store", "tombstones/.DS_Store", "peers/.DS_Store" ];
     for (const f of strays) fs.writeFileSync(path.join(repoB, f), "not ciphertext");
     git("-C", repoB, "add", ...strays);
     git("-C", repoB, "commit", "--quiet", "-m", "stray files");
     git("-C", repoB, "push", "--quiet", "origin", "main");
-    assert.throws(() => sa.pullRemote(), /refusing to pull/);
+    await assert.rejects(sa.pullRemote(), /refusing to pull/);
     // Removed with `git rm` as docs/SYNC.md says, deleted by hand, and rewritten by Finder in a
     // folder verification does not check.
     git("-C", repoA, "rm", "--quiet", "records/.DS_Store");
     fs.unlinkSync(path.join(repoA, "tombstones", ".DS_Store"));
     fs.writeFileSync(path.join(repoA, "peers", ".DS_Store"), "rewritten by Finder");
-    const round = autosyncFor(a, repoA).run();
+    const round = await autosyncFor(a, repoA).run();
     assert.equal(round.state, "OK", round.error);
     assert.doesNotMatch(git("--git-dir", remote, "ls-tree", "-r", "--name-only", "main"), /DS_Store/);
     assert.equal(fs.readFileSync(path.join(repoA, "peers", ".DS_Store"), "utf8"), "rewritten by Finder");
     assert.equal(git("-C", repoA, "status", "--porcelain"), "?? peers/.DS_Store");
-    sb.pullRemote();
+    await sb.pullRemote();
     assert.equal(b.revealSecret("Example", "KEY").value, "synthetic-stray");
 });
 
-test("a stray file named like a wildcard is not read as one", t => {
-    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, remote: remote, git: git} = gitPair(t);
+test("a stray file named like a wildcard is not read as one", async t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, remote: remote, git: git} = await gitPair(t);
     a.createProject("Example");
     a.setSecret("Example", {
         key: "KEY",
         value: "synthetic-key"
     });
-    assert(sa.pushRemote().delivered);
-    sb.pullRemote();
+    assert((await sa.pushRemote()).delivered);
+    await sb.pullRemote();
     const tree = () => git("--git-dir", remote, "ls-tree", "-r", "--name-only", "main").split("\n");
     const before = tree();
     // Git reads `records/*` in a pathspec as every record unless told to take names literally.
@@ -748,23 +750,23 @@ test("a stray file named like a wildcard is not read as one", t => {
         key: "OTHER",
         value: "synthetic-other"
     });
-    const round = autosyncFor(a, repoA).run();
+    const round = await autosyncFor(a, repoA).run();
     assert.equal(round.state, "OK", round.error);
     const after = tree();
     for (const f of before) assert(after.includes(f), `${f} was removed from the remote`);
     assert(!after.some(f => f.endsWith("*")));
-    sb.pullRemote();
+    await sb.pullRemote();
     assert.equal(b.revealSecret("Example", "OTHER").value, "synthetic-other");
 });
 
-test("a halt on failed verification records the reason, not just that the pull was refused", t => {
-    const {a: a, sa: sa, repoA: repoA, repoB: repoB, git: git} = gitPair(t);
+test("a halt on failed verification records the reason, not just that the pull was refused", async t => {
+    const {a: a, sa: sa, repoA: repoA, repoB: repoB, git: git} = await gitPair(t);
     a.createProject("Example");
     a.setSecret("Example", {
         key: "KEY",
         value: "synthetic-tamper"
     });
-    assert(sa.pushRemote().delivered);
+    assert((await sa.pushRemote()).delivered);
     // Someone with write access to the remote alters a record.
     git("-C", repoB, "pull", "--quiet", "--ff-only");
     const record = fs.readdirSync(path.join(repoB, "records")).find(f => f.endsWith(".age"));
@@ -774,7 +776,7 @@ test("a halt on failed verification records the reason, not just that the pull w
     const auto = new AutoSync(a, {
         repo: repoA
     });
-    const round = auto.run({
+    const round = await auto.run({
         manual: true
     });
     assert.deepEqual({
@@ -793,8 +795,8 @@ test("a halt on failed verification records the reason, not just that the pull w
     assert.equal(a.revealSecret("Example", "KEY").value, "synthetic-tamper");
 });
 
-test("files only this checkout has are left alone outside the sync folders too", t => {
-    const {a: a, b: b, sa: sa, repoA: repoA, repoB: repoB, remote: remote, git: git} = gitPair(t);
+test("files only this checkout has are left alone outside the sync folders too", async t => {
+    const {a: a, b: b, sa: sa, repoA: repoA, repoB: repoB, remote: remote, git: git} = await gitPair(t);
     a.createProject("Example");
     a.setSecret("Example", {
         key: "KEY",
@@ -804,7 +806,7 @@ test("files only this checkout has are left alone outside the sync folders too",
     const strays = [ ".DS_Store", ".recipients.txt.swp", ".vscode/settings.json" ];
     fs.mkdirSync(path.join(repoA, ".vscode"));
     for (const f of strays) fs.writeFileSync(path.join(repoA, f), "not sync's");
-    const roundA = new AutoSync(a, {
+    const roundA = await new AutoSync(a, {
         repo: repoA
     }).run({
         manual: true
@@ -818,7 +820,7 @@ test("files only this checkout has are left alone outside the sync folders too",
         halted: false,
         error: null
     });
-    const roundB = new AutoSync(b, {
+    const roundB = await new AutoSync(b, {
         repo: repoB
     }).run({
         manual: true
@@ -826,7 +828,7 @@ test("files only this checkout has are left alone outside the sync folders too",
     assert.equal(roundB.state, "OK");
     assert.equal(b.revealSecret("Example", "KEY").value, "synthetic-root");
     assert.deepEqual(roundB.peerProblems, []);
-    assert.deepEqual(sa.statusRemote().uncommittedFiles, []);
+    assert.deepEqual((await sa.statusRemote()).uncommittedFiles, []);
     const published = git("--git-dir", remote, "log", "--format=", "--name-only").split("\n");
     for (const f of strays) {
         assert(!published.includes(f), `${f} was committed`);
@@ -834,8 +836,8 @@ test("files only this checkout has are left alone outside the sync folders too",
     }
 });
 
-test("a sync file that Git ignores outside the checkout stops a push instead of going missing", t => {
-    const {a: a, b: b, repoA: repoA, repoB: repoB} = gitPair(t);
+test("a sync file that Git ignores outside the checkout stops a push instead of going missing", async t => {
+    const {a: a, b: b, repoA: repoA, repoB: repoB} = await gitPair(t);
     const autoA = new AutoSync(a, {
         repo: repoA
     }), autoB = new AutoSync(b, {
@@ -851,26 +853,26 @@ test("a sync file that Git ignores outside the checkout stops a push instead of 
     // file no peer receives.
     const exclude = path.join(repoA, ".git", "info", "exclude");
     fs.appendFileSync(exclude, "*.age\n");
-    const round = autoA.run({
+    const round = await autoA.run({
         manual: true
     });
     assert.equal(round.state, "ERROR");
     assert.match(round.error, /^Git ignores files sync wrote; refusing to commit: "records\/[a-f0-9]{64}\.age"/);
-    assert.equal(autoB.run({
+    assert.equal((await autoB.run({
         manual: true
-    }).state, "OK");
+    })).state, "OK");
     fs.writeFileSync(exclude, "");
-    assert.equal(autoA.run({
+    assert.equal((await autoA.run({
         manual: true
-    }).state, "OK");
-    assert.equal(autoB.run({
+    })).state, "OK");
+    assert.equal((await autoB.run({
         manual: true
-    }).state, "OK");
+    })).state, "OK");
     assert.equal(b.revealSecret("Example", "KEY").value, "synthetic-excluded");
 });
 
-test("a file only this checkout has does not stop a round committing what an earlier round left", t => {
-    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, git: git} = gitPair(t);
+test("a file only this checkout has does not stop a round committing what an earlier round left", async t => {
+    const {a: a, b: b, sa: sa, sb: sb, repoA: repoA, git: git} = await gitPair(t);
     a.createProject("Shared");
     a.setSecret("Shared", {
         key: "FROM_A",
@@ -883,16 +885,16 @@ test("a file only this checkout has does not stop a round committing what an ear
         key: "FROM_B",
         value: "synthetic-b"
     });
-    assert(sb.pushRemote().delivered);
-    const round = autosyncFor(a, repoA).run();
+    assert((await sb.pushRemote()).delivered);
+    const round = await autosyncFor(a, repoA).run();
     assert.equal(round.state, "OK", round.error);
     assert.equal(git("-C", repoA, "status", "--porcelain"), "?? .DS_Store");
-    sb.pullRemote();
+    await sb.pullRemote();
     assert.equal(b.revealSecret("Shared", "FROM_A").value, "synthetic-a");
 });
 
-test("a Git control file in the checkout stops a push instead of changing what it commits", t => {
-    const {a: a, b: b, repoA: repoA, repoB: repoB} = gitPair(t);
+test("a Git control file in the checkout stops a push instead of changing what it commits", async t => {
+    const {a: a, b: b, repoA: repoA, repoB: repoB} = await gitPair(t);
     const autoA = new AutoSync(a, {
         repo: repoA
     }), autoB = new AutoSync(b, {
@@ -907,28 +909,28 @@ test("a Git control file in the checkout stops a push instead of changing what i
     // receives, and every peer would refuse the repository.
     const ignore = path.join(repoA, "records", ".gitignore");
     fs.writeFileSync(ignore, "*.age\n");
-    let round = autoA.run({
+    let round = await autoA.run({
         manual: true
     });
     assert.equal(round.state, "ERROR");
     assert.match(round.error, /unrelated changes; refusing to commit: "records\/\.gitignore"/);
-    assert.equal(autoB.run({
+    assert.equal((await autoB.run({
         manual: true
-    }).state, "OK");
+    })).state, "OK");
     fs.unlinkSync(ignore);
     // .gitattributes can rewrite the bytes Git stores for ciphertext.
     const attributes = path.join(repoA, ".gitattributes");
     fs.writeFileSync(attributes, "*.age text\n");
-    round = autoA.run({
+    round = await autoA.run({
         manual: true
     });
     assert.match(round.error, /refusing to commit: "\.gitattributes"/);
     fs.unlinkSync(attributes);
-    assert.equal(autoA.run({
+    assert.equal((await autoA.run({
         manual: true
-    }).state, "OK");
-    assert.equal(autoB.run({
+    })).state, "OK");
+    assert.equal((await autoB.run({
         manual: true
-    }).state, "OK");
+    })).state, "OK");
     assert.equal(b.revealSecret("Example", "KEY").value, "synthetic-control");
 });

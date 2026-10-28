@@ -18,10 +18,32 @@ function deriveKey(password, salt, legacy = false) {
     });
 }
 
-function encryptVault(obj, password) {
-    const salt = crypto.randomBytes(16);
+// scrypt takes about half a second, so an unlocked store passes a cache that keeps the key for
+// the vault's current salt. Writes then reuse that salt with a fresh nonce instead of paying the
+// full derivation each time. A cached key is used only for the same password and salt.
+function cachedKey(cache, password, salt) {
+    if (cache && cache.key && cache.password === password && cache.salt.equals(salt)) return cache.key;
+    return deriveKey(password, salt);
+}
+
+function remember(cache, password, salt, key) {
+    if (!cache || cache.key === key) return;
+    if (cache.key) cache.key.fill(0);
+    cache.password = password;
+    cache.salt = salt;
+    cache.key = key;
+}
+
+function forgetKey(cache) {
+    if (cache && cache.key) cache.key.fill(0);
+    if (cache) cache.password = cache.salt = cache.key = null;
+}
+
+function encryptVault(obj, password, cache = null) {
+    const salt = cache && cache.key && cache.password === password ? cache.salt : crypto.randomBytes(16);
     const iv = crypto.randomBytes(12);
-    const key = deriveKey(password, salt);
+    const key = cachedKey(cache, password, salt);
+    remember(cache, password, salt, key);
     const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
     const plaintext = Buffer.from(JSON.stringify(obj), "utf8");
     const ciphertext = Buffer.concat([ cipher.update(plaintext), cipher.final() ]);
@@ -36,7 +58,7 @@ function encryptVault(obj, password) {
     };
 }
 
-function decryptVault(envelope, password) {
+function decryptVault(envelope, password, cache = null) {
     if (!envelope || ![ 1, 2 ].includes(envelope.v) || envelope.kdf !== "scrypt") throw new Error("Unsupported vault encryption format");
     const fields = {
         salt: 16,
@@ -54,10 +76,13 @@ function decryptVault(envelope, password) {
     const iv = Buffer.from(envelope.iv, "base64");
     const tag = Buffer.from(envelope.tag, "base64");
     const data = Buffer.from(envelope.data, "base64");
-    const key = deriveKey(password, salt, envelope.v === 1);
+    const legacy = envelope.v === 1;
+    const key = legacy ? deriveKey(password, salt, true) : cachedKey(cache, password, salt);
     const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
     decipher.setAuthTag(tag);
     const plaintext = Buffer.concat([ decipher.update(data), decipher.final() ]);
+    // Only a key that just authenticated the vault is kept, and never a legacy v1 key.
+    if (!legacy) remember(cache, password, salt, key);
     return JSON.parse(plaintext.toString("utf8"));
 }
 
@@ -136,6 +161,7 @@ const sha256 = s => crypto.createHash("sha256").update(String(s), "utf8").digest
 module.exports = {
     encryptVault: encryptVault,
     decryptVault: decryptVault,
+    forgetKey: forgetKey,
     canonicalize: canonicalize,
     canonicalJson: canonicalJson,
     contentHash: contentHash,

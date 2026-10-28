@@ -55,6 +55,20 @@ const refusal = problems => Object.assign(new Error(`refusing to pull: ${problem
     status: 409
 });
 
+// Remote rounds now wait on the network, so two of them (autosync and a manual sync, say) could
+// otherwise overlap in one checkout. Each repository runs one remote operation at a time, in call order.
+const remoteQueues = new Map;
+
+function serialized(repo, fn) {
+    const next = (remoteQueues.get(repo) || Promise.resolve()).then(() => fn());
+    const settled = next.then(() => {}, () => {});
+    remoteQueues.set(repo, settled);
+    settled.then(() => {
+        if (remoteQueues.get(repo) === settled) remoteQueues.delete(repo);
+    });
+    return next;
+}
+
 class Sync {
     constructor(store, repoDir) {
         this.store = store;
@@ -73,13 +87,21 @@ class Sync {
         this.indexPath = path.join(store.dataDir, "sync-index.json");
         this.git = new GitRepo(repoDir);
     }
+    // The vault can lock while git waits on the network. Work that reads or changes the vault
+    // after such a wait checks first and stops cleanly instead.
+    requireUnlocked() {
+        if (!this.store.isUnlocked()) throw Object.assign(new Error("Vault is locked"), {
+            status: 423,
+            state: "PAUSED_LOCKED"
+        });
+    }
     receipt(extra = {}) {
         const div = this.git.isRepo() ? this.git.divergence() : {
             ok: false
         };
         const unsent = this.git.isRepo() ? this.unsent() : null;
         return {
-            sourceFingerprint: this.store.contentFingerprint(),
+            sourceFingerprint: this.store.isUnlocked() ? this.store.contentFingerprint() : null,
             manifestCounter: (this.readIndex().lastPush || {}).counter || 0,
             machineId: this.machineId(),
             sourceCommit: this.git.isRepo() ? this.git.head() : null,
@@ -114,6 +136,11 @@ class Sync {
         return fs.existsSync(this.dirs[dir]) ? fs.readdirSync(this.dirs[dir]).filter(f => SYNC_FILE.test(`${dir}/${f}`)) : [];
     }
     pushRemote({message: message} = {}) {
+        return serialized(this.repo, () => this.pushRemoteNow({
+            message: message
+        }));
+    }
+    async pushRemoteNow({message: message}) {
         const wrote = this.push();
         if (!this.git.isRepo()) {
             return {
@@ -161,7 +188,7 @@ class Sync {
                 receipt: this.receipt()
             };
         }
-        const pushed = this.git.push();
+        const pushed = await this.git.push();
         if (!pushed.ok) {
             return {
                 ...wrote,
@@ -190,6 +217,9 @@ class Sync {
         };
     }
     pullRemote(options = {}) {
+        return serialized(this.repo, () => this.pullRemoteNow(options));
+    }
+    async pullRemoteNow(options) {
         if (!this.git.isRepo()) {
             const merged = this.pull(options);
             return {
@@ -199,13 +229,20 @@ class Sync {
             };
         }
         this.commitLeftovers();
-        const ff = this.git.pullFF();
+        const ff = await this.git.pullFF();
         if (!ff.ok) {
             const e = new Error(`cannot update the sync repo: ${ff.error}`);
             e.code = ff.code || "REMOTE_UNREACHABLE";
             e.status = 409;
             throw e;
         }
+        this.requireUnlocked();
+        // Another process may have saved the vault while git waited. Merge into its copy, not
+        // the stale one in memory, and wait for a save still in progress.
+        if (!this.store.reloadIfChanged() && this.store.changedOnDisk()) throw Object.assign(new Error("Another process is still saving the vault; the next round syncs its copy"), {
+            state: "VAULT_BUSY",
+            status: 409
+        });
         const merged = this.pull(options);
         return {
             ...merged,
@@ -242,6 +279,9 @@ class Sync {
         return c;
     }
     statusRemote() {
+        return serialized(this.repo, () => this.statusRemoteNow());
+    }
+    async statusRemoteNow() {
         const base = this.status();
         if (!this.git.isRepo()) {
             return {
@@ -251,7 +291,7 @@ class Sync {
                 detail: `${this.repo} is not a git repo; records go nowhere`
             };
         }
-        const f = this.git.fetch();
+        const f = await this.git.fetch();
         const unsent = this.unsent();
         const div = f.ok ? this.git.divergence() : {
             ok: false
