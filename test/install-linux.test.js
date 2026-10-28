@@ -90,7 +90,7 @@ test("Linux installer refuses to replace a folder that is not a VaultOS install"
     fs.writeFileSync(path.join(other, "keep.txt"), "synthetic");
     const r = run("--prefix", other);
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /not a VaultOS Preview install/);
+    assert.match(r.stderr, /not a VaultOS install/);
     assert.deepEqual(fs.readdirSync(other), [ "keep.txt" ]);
     assert.notEqual(run("--prefix", "relative/path").status, 0);
 });

@@ -39,6 +39,10 @@ const diskStat = file => {
 
 const AUTO_SYNC_DEFAULT_SECONDS = 120;
 
+// History keeps each change's before and after values so it can be reverted. Past this size
+// the oldest entries are dropped, as they are past 2,000 entries.
+const HISTORY_BYTES = 1 << 20;
+
 function expiryInfo(expiresAt) {
     if (!expiresAt) return {
         expiryStatus: "none",
@@ -92,7 +96,7 @@ class Store {
         this.persist();
         if (this.vault.settings.rememberPassword === true) {
             try {
-                this.keyring.set(password);
+                this.keyring.ensure(password);
             } catch {}
         }
     }
@@ -111,7 +115,7 @@ class Store {
         this.savedVault = clone(vault);
         if (this.vault.settings.rememberPassword === true) {
             try {
-                this.keyring.set(password);
+                this.keyring.ensure(password);
             } catch {}
         }
         if (migrated) {
@@ -163,12 +167,15 @@ class Store {
         const backups=[];
         const dir=path.join(this.dataDir,'backups');
         if(reencryptBackups && fs.existsSync(dir)){
+            // Backups are copies of vault.enc and share its salt, so one derivation per salt
+            // serves them all instead of two scrypt runs per file.
+            const oldKeys={};
             for(const name of fs.readdirSync(dir)){
                 const file=path.join(dir,name);
                 try{
                     regularFile(file);
-                    const data=decryptVault(JSON.parse(fs.readFileSync(file,'utf8')),oldPassword);
-                    atomicWrite(file,JSON.stringify(encryptVault(data,newPassword)));
+                    const data=decryptVault(JSON.parse(fs.readFileSync(file,'utf8')),oldPassword,oldKeys);
+                    atomicWrite(file,JSON.stringify(encryptVault(data,newPassword,this.keyCache)));
                     backups.push({file:name,status:'re-encrypted'});
                 }catch{backups.push({file:name,status:'not re-encrypted; preserve the old password and inspect this backup'});}
             }
@@ -297,8 +304,35 @@ class Store {
         }
         return true;
     }
+    // Runs fn with every persist() inside it deferred to one save at the end, so a bulk change
+    // (an .env import) encrypts and writes the vault once instead of once per key. If fn
+    // throws, or the save fails, none of its changes are kept.
+    batch(fn) {
+        if (this.batching) return fn();
+        this.batching = true;
+        this.batchDirty = false;
+        let result;
+        try {
+            result = fn();
+        } catch (e) {
+            if (this.batchDirty) this.vault = clone(this.savedVault);
+            throw e;
+        } finally {
+            this.batching = false;
+        }
+        if (this.batchDirty) this.persist();
+        return result;
+    }
     persist() {
         if (!this.isUnlocked()) throw new Error("vault is locked");
+        if (this.batching) {
+            this.batchDirty = true;
+            return;
+        }
+        if (this.historyGrew) {
+            this.historyGrew = false;
+            this.trimHistory();
+        }
         let releaseWrite;
         try {
             releaseWrite = require("./session").claim(this.dataDir, "write.lock");
@@ -394,6 +428,13 @@ class Store {
             reverted: false
         });
         if (this.vault.history.length > 2e3) this.vault.history.splice(0, this.vault.history.length - 2e3);
+        this.historyGrew = true;
+    }
+    trimHistory() {
+        const h = this.vault.history || [];
+        let size = Buffer.byteLength(JSON.stringify(h)), drop = 0;
+        while (size > HISTORY_BYTES && drop < h.length - 1) size -= Buffer.byteLength(JSON.stringify(h[drop++])) + 1;
+        if (drop) h.splice(0, drop);
     }
     listHistory(limit = 500) {
         const h = (this.vault.history || []).slice().reverse();
@@ -1010,20 +1051,22 @@ class Store {
         });
         const parsed = require("dotenv").parse(fs.readFileSync(envPath, "utf8"));
         const keys = [], refused = [];
-        for (const [key, value] of Object.entries(parsed)) {
-            try {
-                this.setSecret(p.name, {
-                    key: key,
-                    value: value
-                }, actor);
-                keys.push(key);
-            } catch (e) {
-                refused.push({
-                    key: key,
-                    why: e.message
-                });
+        this.batch(() => {
+            for (const [key, value] of Object.entries(parsed)) {
+                try {
+                    this.setSecret(p.name, {
+                        key: key,
+                        value: value
+                    }, actor);
+                    keys.push(key);
+                } catch (e) {
+                    refused.push({
+                        key: key,
+                        why: e.message
+                    });
+                }
             }
-        }
+        });
         this.audit("import", `${envPath} -> ${p.name} (${keys.length} keys)`, actor);
         return {
             project: p.name,

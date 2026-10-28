@@ -48,7 +48,7 @@ try {
     });
     const [folder] = await packager({
         dir: stage,
-        name: "VaultOS Preview",
+        name: "VaultOS",
         platform: "darwin",
         arch: arch,
         electronVersion: pkg.devDependencies.electron,
@@ -67,7 +67,7 @@ try {
         },
         extraResource: [ "build/native/vaultos-keychain" ]
     });
-    const bundle = path.join(folder, "VaultOS Preview.app");
+    const bundle = path.join(folder, "VaultOS.app");
     cpSync(path.join(folder,'LICENSE'),path.join(bundle,'Contents','Resources','LICENSE.electron'));
     cpSync(path.join(folder,'LICENSES.chromium.html'),path.join(bundle,'Contents','Resources','LICENSES.chromium.html'));
     await flipFuses(bundle, {

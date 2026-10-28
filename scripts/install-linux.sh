@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install a packaged VaultOS Preview Linux build for the current user.
+# Install a packaged VaultOS Linux build for the current user.
 #
 #   scripts/install-linux.sh [--from DIR|ARCHIVE] [--prefix DIR] [--harden] [--enable-service]
 #
@@ -52,14 +52,14 @@ safe_path "$prefix" "--prefix"
 desktop_file="$(xdg_dir XDG_DATA_HOME "$HOME/.local/share")/applications/org.vaultos.preview.desktop"
 unit_file="$(xdg_dir XDG_CONFIG_HOME "$HOME/.config")/systemd/user/vaultos-preview-backend.service"
 
-# Never replace a folder that is not a previous VaultOS Preview install.
+# Never replace a folder that is not a previous VaultOS install.
 if [[ -e "$prefix" ]]; then
   [[ -d "$prefix" ]] || die "$prefix exists and is not a folder"
   if [[ -n "$(ls -A "$prefix")" && ! ( -x "$prefix/vaultos-preview" && -f "$prefix/resources/app.asar" ) ]]; then
-    die "$prefix is not empty and is not a VaultOS Preview install; choose another --prefix"
+    die "$prefix is not empty and is not a VaultOS install; choose another --prefix"
   fi
   if command -v pgrep >/dev/null 2>&1 && pgrep -f -- "$prefix/vaultos-preview" >/dev/null 2>&1; then
-    die "VaultOS Preview is running from $prefix; quit it and retry"
+    die "VaultOS is running from $prefix; quit it and retry"
   fi
 fi
 
@@ -78,7 +78,7 @@ if [[ -f "$src" ]]; then
   src="$tmp/vaultos-preview-linux-$arch"
 fi
 [[ -x "$src/vaultos-preview" && -f "$src/resources/app.asar" && -f "$src/chrome-sandbox" ]] \
-  || die "no VaultOS Preview linux-$arch build at $src; run 'npm run dist:linux' or pass --from"
+  || die "no VaultOS linux-$arch build at $src; run 'npm run dist:linux' or pass --from"
 
 mkdir -p "$(dirname "$prefix")"
 staging="$(mktemp -d "$(dirname "$prefix")/.vaultos-preview-install.XXXXXX")"
@@ -99,7 +99,7 @@ fi
 
 cat > "$staging/vaultos-preview.sh" <<'LAUNCH'
 #!/usr/bin/env bash
-# Start VaultOS Preview with the Chromium sandbox whenever this system can provide one.
+# Start VaultOS with the Chromium sandbox whenever this system can provide one.
 # Checked at each launch, so hardening the helper later takes effect without reinstalling.
 set -euo pipefail
 here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -117,7 +117,7 @@ userns_sandbox() {
 if suid_helper || userns_sandbox; then
   exec "$here/vaultos-preview" "$@"
 fi
-echo "VaultOS Preview: the Chromium sandbox is unavailable; starting with --no-sandbox." >&2
+echo "VaultOS: the Chromium sandbox is unavailable; starting with --no-sandbox." >&2
 printf 'To enable it: sudo chown root:root %q && sudo chmod 4755 %q\n' "$helper" "$helper" >&2
 exec "$here/vaultos-preview" --no-sandbox "$@"
 LAUNCH
@@ -135,13 +135,13 @@ mkdir -p "$(dirname "$desktop_file")"
 cat > "$desktop_file.tmp" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=VaultOS Preview
+Name=VaultOS
 Comment=Local vault for project secrets with an MCP bridge for coding agents
 Exec="$prefix/vaultos-preview.sh"
 Icon=$prefix/vaultos-preview.png
 Terminal=false
 Categories=Development;Utility;
-StartupWMClass=VaultOS Preview
+StartupWMClass=VaultOS
 DESKTOP
 chmod 644 "$desktop_file.tmp"
 mv -f "$desktop_file.tmp" "$desktop_file"

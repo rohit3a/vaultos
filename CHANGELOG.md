@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Storage: history is capped at 1 MB as well as 2,000 entries, dropping the oldest first, so large values no longer grow the vault without limit. Revert still works for the entries kept.
+- Sync: the vault copies a pull writes to `backups/` are pruned to the newest 20 plus any from the last 30 days. Other files in `backups/` are left alone.
+- Keychain: an unlock with remembering on rewrites the stored password only when it is missing or different, instead of on every unlock.
+- Desktop: the app is named VaultOS (VaultOS.app on macOS) instead of VaultOS Preview. The data directory, Keychain and Secret Service names, bundle identifier and Linux install paths keep their `VaultOS-Preview` and `org.vaultos.preview` names, so existing vaults and remembered passwords carry over.
+- Desktop: a plain interface. The platform's own font, neutral greys with one blue accent, compact controls and hairline borders replace the mascot, the rounded display font, the cream-and-orange palette and the large pill buttons. No web fonts are bundled or loaded any more (about 124 KB less), and the renderer CSP now sets `font-src 'none'`.
+- Sync: a pull decrypts only sync files it has not already read. Every pull used to run `age` once per record; repeating a pull of 200 unchanged records went from about 840 ms to 36 ms.
+- Performance: an .env import saves the vault once instead of once per key (200 keys: about 1.8 s to 14 ms), **Approve all** approves every pending key in one confirmed save, password rotation derives each backup key once instead of twice per file, and a sync round asks Git for its branch and remote once.
+- Desktop: overlapping unlocks (a Touch ID prompt and a typed password) no longer start a second API server or report that another process owns the vault, and Lock clears a copied value still on the clipboard.
+- API: an agent that creates a project gets the project and its grant to it in one save, never one without the other.
 - Performance: saving no longer repeats the vault's scrypt key derivation. Every edit, approval or deletion took about half a second and froze the desktop window while it ran; a write now takes a few milliseconds. The key for the vault's current salt is kept while unlocked and zeroed on lock; the file format is unchanged.
 - Sync: fetch and push run asynchronously, so a slow remote no longer freezes the desktop window or the agent API during a sync round, and over SSH a round's fetch, push and verifying fetch share one connection (kept for five minutes) instead of handshaking three or four times. Your own `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` turns this off. Remote sync operations on one checkout now run one at a time.
 - Dependencies: Electron 44.10.0 (GHSA-jr5w-w6x2-84p9) and patched transitive packages (body-parser, undici, zod, qs, hono, fast-uri, ip-address) clear the `npm audit` advisories that failed CI.

@@ -69,7 +69,7 @@ test("Linux keyring stores, reads and clears through secret-tool without argv se
     const argv = fs.readFileSync(path.join(secrets, "argv.log"), "utf8");
     assert(!argv.includes(PW));
     assert(argv.includes(`lookup service ${keyring.service} account master-password`));
-    assert(argv.includes(`store --label=VaultOS Preview master password service ${keyring.service} account master-password`));
+    assert(argv.includes(`store --label=VaultOS master password service ${keyring.service} account master-password`));
     const other = new Keyring(path.join(dir, "other"), {
         platform: "linux",
         env: env
@@ -279,4 +279,21 @@ test("default data directories keep the preview namespace on each platform", () 
         },
         home: home
     }), /absolute/);
+});
+
+test("a remembered password that is already stored is read, not rewritten", {
+    skip: skip
+}, t => {
+    const {dir: dir, secrets: secrets, env: env} = fixture(t);
+    const keyring = new Keyring(path.join(dir, "data"), {
+        platform: "linux",
+        env: env
+    });
+    keyring.ensure(PW);
+    keyring.ensure(PW);
+    const stores = () => fs.readFileSync(path.join(secrets, "argv.log"), "utf8").split("\n").filter(l => l.startsWith("store ")).length;
+    assert.equal(stores(), 1);
+    keyring.ensure(PW + "-changed");
+    assert.equal(stores(), 2);
+    assert.equal(keyring.get(), PW + "-changed");
 });

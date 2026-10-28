@@ -143,7 +143,7 @@ function sourceBackups(from) {
 function transform(raw, options = {}) {
     if (!raw || typeof raw !== "object" || !Array.isArray(raw.projects)) throw new Error("Invalid vault data");
     const fromFormat = raw.formatVersion || 1;
-    if (fromFormat >= M.FORMAT_VERSION) throw new Error("This vault is already in VaultOS Preview format; restore it with the recovery steps instead of importing it");
+    if (fromFormat >= M.FORMAT_VERSION) throw new Error("This vault is already in VaultOS format; restore it with the recovery steps instead of importing it");
     M.assertReadable(raw);
     const {vault: vault} = M.migrate(raw);
     const failures = [], denied = [], dropped = [];
@@ -418,10 +418,10 @@ const inside = (a, b) => a === b || a.startsWith(b + path.sep);
 async function preflight(opts, dataDir) {
     if (!fs.existsSync(opts.from) || !fs.statSync(opts.from).isDirectory()) throw new Error("--from must be an existing data directory");
     const from = real(opts.from), target = real(dataDir);
-    if (inside(from, target) || inside(target, from)) throw new Error("--from must be a different directory from the VaultOS Preview data directory");
-    if (fs.existsSync(path.join(dataDir, "vault.enc"))) throw new Error("This VaultOS Preview data directory already has a vault. Import only into a new, empty data directory (set VAULTOS_DATA_DIR)");
+    if (inside(from, target) || inside(target, from)) throw new Error("--from must be a different directory from the VaultOS data directory");
+    if (fs.existsSync(path.join(dataDir, "vault.enc"))) throw new Error("This VaultOS data directory already has a vault. Import only into a new, empty data directory (set VAULTOS_DATA_DIR)");
     if (await legacyOwner(path.join(opts.from, "session.json"))) throw new Error("The earlier vault-os app or backend is running. Quit it (and stop its background service) before importing");
-    if (fs.existsSync(dataDir) && (session.lockOwner(dataDir) || await session.findOwner(path.join(dataDir, "session.json")))) throw new Error("VaultOS Preview is running for this data directory. Quit it before importing");
+    if (fs.existsSync(dataDir) && (session.lockOwner(dataDir) || await session.findOwner(path.join(dataDir, "session.json")))) throw new Error("VaultOS is running for this data directory. Quit it before importing");
 }
 
 function writeTarget(dataDir, from, vault, password, tokens, report) {
@@ -576,7 +576,7 @@ async function runImportLegacy(argv, {dataDir: dataDir = defaultDataDir(), readP
             env: `VAULTOS_AGENT=${t.agent}`
         } : {}
     }));
-    out.rollback = "The earlier data directory was not modified. To roll back, quit VaultOS Preview, remove this data directory, and keep using the earlier app.";
+    out.rollback = "The earlier data directory was not modified. To roll back, quit VaultOS, remove this data directory, and keep using the earlier app.";
     return out;
 }
 

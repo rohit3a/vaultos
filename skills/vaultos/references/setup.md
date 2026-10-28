@@ -14,7 +14,7 @@ vault or search its credential files. Defaults for this project:
 
 | Item | Value |
 | --- | --- |
-| App | `VaultOS Preview.app` |
+| App | `VaultOS.app` |
 | macOS data | `~/Library/Application Support/VaultOS-Preview` |
 | Linux data | `~/.config/VaultOS-Preview` (or `$XDG_CONFIG_HOME/VaultOS-Preview`) |
 | Keychain / Secret Service prefix | `org.vaultos.preview.` |

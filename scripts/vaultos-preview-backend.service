@@ -1,4 +1,4 @@
-# systemd user unit template for the VaultOS Preview headless backend.
+# systemd user unit template for the VaultOS headless backend.
 #
 # scripts/install-linux.sh --enable-service renders this to
 # ~/.config/systemd/user/vaultos-preview-backend.service, replacing @NODE@ and
@@ -8,7 +8,7 @@
 # desktop Settings (password remembered in the Secret Service) and a manual lock
 # has not blocked it. Opening the desktop asks the backend to stop and takes over.
 [Unit]
-Description=VaultOS Preview headless backend
+Description=VaultOS headless backend
 Documentation=https://github.com/rohit3a/vaultos/blob/main/docs/ARCHITECTURE.md
 
 [Service]

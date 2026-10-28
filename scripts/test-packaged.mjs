@@ -22,7 +22,7 @@ const port = listener.address().port;
 
 await new Promise(r => listener.close(r));
 
-const executable = path.resolve(process.env.VAULTOS_TEST_APP || `dist/VaultOS Preview-darwin-${process.arch}/VaultOS Preview.app/Contents/MacOS/VaultOS Preview`);
+const executable = path.resolve(process.env.VAULTOS_TEST_APP || `dist/VaultOS-darwin-${process.arch}/VaultOS.app/Contents/MacOS/VaultOS`);
 
 const child = spawn(executable, [ `--remote-debugging-port=${port}` ], {
     env: {

@@ -83,6 +83,31 @@ test("writes reuse the unlocked key with a fresh nonce, never for another passwo
     assert.throws(() => decryptVault(JSON.parse(fs.readFileSync(store.vaultPath, "utf8")), PW));
 });
 
+test("an .env import saves the vault once, and a failed batch keeps none of its changes", t => {
+    const {dir: dir, store: store} = fixture(t);
+    const env = path.join(dir, "synthetic.env");
+    fs.writeFileSync(env, Array.from({
+        length: 40
+    }, (_, i) => `KEY_${i}=synthetic-${i}`).join("\n"));
+    let saves = 0;
+    store.onPersist(() => saves++);
+    const result = store.importEnv("Example", env);
+    assert.equal(result.count, 40);
+    assert.equal(saves, 1);
+    const other = new Store(store.dataDir);
+    other.unlock(PW);
+    assert.equal(other.listSecrets("Example").length, 40);
+    assert.throws(() => store.batch(() => {
+        store.setSecret("Example", {
+            key: "NOT_KEPT",
+            value: "synthetic"
+        });
+        throw new Error("synthetic failure");
+    }), /synthetic failure/);
+    assert.equal(saves, 1);
+    assert(!store.listSecrets("Example").some(s => s.key === "NOT_KEPT"));
+});
+
 test("project lookup is exact, updates validate fields and agent ownership holds", t => {
     const {store: store} = fixture(t);
     store.createProject("Example Two");
@@ -209,4 +234,26 @@ test('rotation reports a Keychain failure while completing backup re-encryption'
     const {store}=fixture(t);const dir=path.join(store.dataDir,'backups');fs.mkdirSync(dir);const backup=path.join(dir,'previous.enc');fs.copyFileSync(store.vaultPath,backup);
     store.keyring={describe:()=>({store:'unavailable'}),clear:()=>{throw new Error('synthetic unavailable');}};
     const result=store.changePassword(PW,'synthetic-new-password');assert.equal(result.warnings.length,1);assert.equal(result.backups[0].status,'re-encrypted');assert(decryptVault(JSON.parse(fs.readFileSync(backup)),'synthetic-new-password'));
+});
+
+test("history drops its oldest entries past 1 MB and stays revertible", t => {
+    const {store: store} = fixture(t);
+    const big = "x".repeat(4e4);
+    for (let i = 0; i < 60; i++) store.record("synthetic", {
+        before: big + i,
+        after: big + i
+    });
+    store.persist();
+    const h = store.vault.history;
+    assert(Buffer.byteLength(JSON.stringify(h)) <= 1 << 20);
+    assert(h.length > 1 && h.length < 60);
+    assert.equal(h.at(-1).after, big + 59);
+    const reopened = new Store(store.dataDir);
+    reopened.unlock(PW);
+    assert.equal(reopened.vault.history.length, h.length);
+    store.setSecret("Example", {
+        key: "AFTER_TRIM",
+        value: "synthetic"
+    });
+    assert.equal(store.listHistory(1)[0].key, "AFTER_TRIM");
 });

@@ -83,7 +83,7 @@ async function main({service: service = process.argv.includes("--service"), stor
     // Permanent conditions exit 0 in service mode so launchd (KeepAlive SuccessfulExit=false)
     // and systemd (Restart=on-failure) do not relaunch the service in a loop.
     if (!store.exists()) {
-        log("no vault yet. Open VaultOS Preview once to create one.");
+        log("no vault yet. Open VaultOS once to create one.");
         return service ? 0 : 2;
     }
     if (!service) {
@@ -95,7 +95,7 @@ async function main({service: service = process.argv.includes("--service"), stor
         const release = claim(store.dataDir);
         process.on("exit", release);
         if (!store.autoUnlock()) {
-            log("could not auto-unlock. Open VaultOS Preview once and enter the master password.");
+            log("could not auto-unlock. Open VaultOS once and enter the master password.");
             return 3;
         }
         await serve(store, release, {
@@ -134,7 +134,7 @@ async function main({service: service = process.argv.includes("--service"), stor
                 return 0;
             }
             if (status.reason === "no-vault") {
-                log("no vault yet. Open VaultOS Preview once to create one.");
+                log("no vault yet. Open VaultOS once to create one.");
                 return 0;
             }
             if (status.reason === "no-password") {

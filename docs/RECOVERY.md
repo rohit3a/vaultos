@@ -12,6 +12,8 @@ node cli.cjs backup /absolute/new/backup-directory
 
 This copies only the encrypted vault. The command overwrites `vault.enc` in the chosen directory, so choose a new dated directory for each snapshot. You must retain the corresponding passphrase. Do not send backups in bug reports or commit them to the public source repository.
 
+A pull that changes the vault also keeps its own copy of `vault.enc` in `backups/` inside the data directory. Only the newest 20 of those, plus any from the last 30 days, are kept, so they do not replace your own dated backups. Other files you place in `backups/` are never deleted.
+
 Sync users additionally need the whole private preview data directory for their machine identity, signing key and replay state. This directory includes sensitive local keys and audit metadata; encrypt the backup itself. Avoid restoring the same machine identity on two simultaneously active devices. Enroll a new machine for a new installation.
 
 ## Test recovery without touching a working vault
@@ -24,7 +26,7 @@ For actual replacement, quit all processes owning that **preview** directory, pr
 
 ## Importing from the earlier vault-os fork
 
-If you used the earlier `vault-os` fork, you can import its data directory once, explicitly, into a **new, empty** preview data directory. Nothing does this automatically. Quit the earlier app and any background service it runs, and quit VaultOS Preview, then from a source checkout:
+If you used the earlier `vault-os` fork, you can import its data directory once, explicitly, into a **new, empty** preview data directory. Nothing does this automatically. Quit the earlier app and any background service it runs, and quit VaultOS, then from a source checkout:
 
 ```sh
 node cli.cjs import-legacy --from /absolute/path/to/earlier/vault-os --plan
@@ -42,7 +44,7 @@ The earlier directory is `~/Library/Application Support/vault-os` on macOS and `
 - `audit.log` is copied with an import entry appended, and `backups/*.enc` are copied unchanged. Those backups remain in the earlier envelope and password; this build can read them.
 - The PDF export password and approval relay hash carry over. `--lock-policy soft|hard` and `--auto-sync` set those options. Background access stays off unless you pass `--remember-password`, which stores the master password in the macOS Keychain or Linux Secret Service (the import refuses if neither is available); add `--touch-id` to turn on Touch ID unlock.
 
-To roll back, quit VaultOS Preview and remove the new preview data directory. The earlier data directory is unchanged.
+To roll back, quit VaultOS and remove the new preview data directory. The earlier data directory is unchanged.
 
 ## Password rotation
 
@@ -56,6 +58,6 @@ A process ownership lock prevents desktop/backend/CLI overlap. A disk hash check
 
 ## Uninstall
 
-Quit **VaultOS Preview**, remove its MCP client entry, and delete the preview app. Preserve an encrypted backup if needed. To forget background access, disable it in Settings or click Lock before quitting. Its Keychain service begins with `org.vaultos.preview.`; delete only the matching preview entry if manual cleanup is necessary. Then remove only the preview data directory and your preview agent token file. The app creates no login item, launch agent, automatic updater, or system service.
+Quit **VaultOS**, remove its MCP client entry, and delete the preview app. Preserve an encrypted backup if needed. To forget background access, disable it in Settings or click Lock before quitting. Its Keychain service begins with `org.vaultos.preview.`; delete only the matching preview entry if manual cleanup is necessary. Then remove only the preview data directory and your preview agent token file. The app creates no login item, launch agent, automatic updater, or system service.
 
 On Linux, the remembered password is a Secret Service item whose `service` attribute begins with `org.vaultos.preview.`; disabling background access removes it, or delete only that item in a keyring manager such as Seahorse. If you installed the backend unit, run `systemctl --user disable --now vaultos-preview-backend.service` and remove `~/.config/systemd/user/vaultos-preview-backend.service`. Then remove the install folder (default `~/.local/opt/vaultos-preview`) and `~/.local/share/applications/org.vaultos.preview.desktop`.

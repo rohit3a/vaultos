@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld("vault", {
     delegate: (project, key, agentRef, on) => ipcRenderer.invoke("vault:delegate", project, key, agentRef, on),
     adopt: (project, key) => ipcRenderer.invoke("vault:adopt", project, key),
     approveInject: (project, key, on) => ipcRenderer.invoke("vault:approveInject", project, key, on),
+    approveInjectAll: items => ipcRenderer.invoke("vault:approveInjectAll", items),
     pending: () => ipcRenderer.invoke("vault:pending"),
     history: limit => ipcRenderer.invoke("vault:history", limit),
     revert: id => ipcRenderer.invoke("vault:revert", id),

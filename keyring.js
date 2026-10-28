@@ -108,7 +108,7 @@ class Keyring {
         const attributes = [ "service", this.service, "account", ACCOUNT ];
         const args = {
             get: [ "lookup", ...attributes ],
-            set: [ "store", "--label=VaultOS Preview master password", ...attributes ],
+            set: [ "store", "--label=VaultOS master password", ...attributes ],
             delete: [ "clear", ...attributes ]
         }[action];
         if (!args) throw new Error("Unknown keyring action");
@@ -145,6 +145,11 @@ class Keyring {
         this.call("set", password);
         if (this.get() !== password) throw new Error(this.platform === "linux" ? "Secret Service readback failed" : "Keychain readback failed");
         return this.describe();
+    }
+    // Writes only when the stored password is missing or different, so an unlock with the
+    // remembered password reads the item instead of replacing it.
+    ensure(password) {
+        if (this.get() !== password) this.set(password);
     }
     clear() {
         if (this.describe().secure) this.call("delete");

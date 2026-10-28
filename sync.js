@@ -59,6 +59,32 @@ const refusal = problems => Object.assign(new Error(`refusing to pull: ${problem
 // otherwise overlap in one checkout. Each repository runs one remote operation at a time, in call order.
 const remoteQueues = new Map;
 
+// Decrypting a sync file runs an age process, a few milliseconds each, and every pull read every
+// record. Plaintext decrypted from byte-identical ciphertext with the same identity is reused
+// instead. It is kept per in-memory vault object, so it goes with that object on lock or reload,
+// copied in and out so a merge can never change what is remembered, and each pull keeps only the
+// entries it used.
+const decrypted = new WeakMap;
+
+// A pull that changes the vault first copies vault.enc to backups/<ms>-<id>.enc. The newest
+// BACKUPS_KEPT of those, and any younger than BACKUP_DAYS, are kept; other files there are
+// never touched.
+const PULL_BACKUP = /^(\d+)-[a-f0-9]{16}\.enc$/;
+
+const BACKUPS_KEPT = 20;
+
+const BACKUP_DAYS = 30;
+
+const pruneBackups = (dir, now = Date.now()) => {
+    const old = fs.readdirSync(dir).map(name => ({
+        name: name,
+        ms: Number(PULL_BACKUP.exec(name)?.[1])
+    })).filter(b => b.ms).sort((x, y) => y.ms - x.ms).slice(BACKUPS_KEPT).filter(b => now - b.ms > BACKUP_DAYS * 864e5);
+    for (const b of old) fs.rmSync(path.join(dir, b.name), {
+        force: true
+    });
+};
+
 function serialized(repo, fn) {
     const next = (remoteQueues.get(repo) || Promise.resolve()).then(() => fn());
     const settled = next.then(() => {}, () => {});
@@ -441,16 +467,49 @@ class Sync {
         if (!fs.existsSync(this.recipientsPath)) throw new Error("no recipients.txt. Run: vault-sync init");
         return this.age([ "-R", this.recipientsPath, "-o", "-" ], Buffer.from(canonicalJson(obj), "utf8"));
     }
+    decryptBytes(bytes) {
+        if (!fs.existsSync(this.identityPath)) throw new Error(`no age identity at ${this.identityPath}`);
+        return JSON.parse(this.age([ "-d", "-i", this.identityPath ], bytes).toString("utf8"));
+    }
     decryptFile(file) {
         if (!fs.existsSync(this.identityPath)) throw new Error(`no age identity at ${this.identityPath}`);
         const out = this.age([ "-d", "-i", this.identityPath, file ]);
         return JSON.parse(out.toString("utf8"));
     }
-    tryDecrypt(file) {
+    decryptor() {
+        const vault = this.store.vault, previous = vault && decrypted.get(vault) || new Map, next = new Map;
+        if (vault) decrypted.set(vault, next);
+        const identity = fs.existsSync(this.identityPath) ? crypto.createHash("sha256").update(fs.readFileSync(this.identityPath)).digest("hex") : "";
+        return file => {
+            let bytes;
+            try {
+                bytes = fs.readFileSync(file);
+            } catch (e) {
+                return {
+                    ok: false,
+                    error: String(e.message || e).split("\n")[0]
+                };
+            }
+            const key = `${file}\0${crypto.createHash("sha256").update(bytes).digest("hex")}\0${identity}`;
+            const hit = previous.get(key) || next.get(key);
+            if (hit) {
+                next.set(key, hit);
+                return {
+                    ok: true,
+                    payload: structuredClone(hit)
+                };
+            }
+            // age reads the bytes just hashed from stdin, so the file cannot change in between.
+            const r = this.tryDecrypt(null, bytes);
+            if (r.ok) next.set(key, structuredClone(r.payload));
+            return r;
+        };
+    }
+    tryDecrypt(file, bytes = null) {
         try {
             return {
                 ok: true,
-                payload: this.decryptFile(file)
+                payload: bytes ? this.decryptBytes(bytes) : this.decryptFile(file)
             };
         } catch (e) {
             return {
@@ -744,8 +803,9 @@ class Sync {
         if (ver.problems.length) throw refusal(ver.problems);
         const remote = new Map;
         const unreadable = [];
+        const decrypt = this.decryptor();
         for (const f of this.syncFiles("records")) {
-            const r = this.tryDecrypt(path.join(this.dirs.records, f));
+            const r = decrypt(path.join(this.dirs.records, f));
             if (!r.ok) {
                 unreadable.push({
                     file: `records/${f}`,
@@ -760,7 +820,7 @@ class Sync {
         }
         const remoteTombs = new Map;
         for (const f of this.syncFiles("tombstones")) {
-            const r = this.tryDecrypt(path.join(this.dirs.tombstones, f));
+            const r = decrypt(path.join(this.dirs.tombstones, f));
             if (!r.ok) {
                 unreadable.push({
                     file: `tombstones/${f}`,
@@ -867,6 +927,9 @@ class Sync {
                 mode: 448
             });
             atomicWrite(path.join(backupDir, Date.now() + "-" + randomId() + ".enc"), fs.readFileSync(this.store.vaultPath));
+            try {
+                pruneBackups(backupDir);
+            } catch {}
         }
         const rollback = JSON.parse(JSON.stringify(this.store.vault));
         try {
@@ -1051,5 +1114,6 @@ class Sync {
 module.exports = {
     Sync: Sync,
     opaque: opaque,
-    findTool: findTool
+    findTool: findTool,
+    pruneBackups: pruneBackups
 };
