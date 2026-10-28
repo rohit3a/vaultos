@@ -146,6 +146,11 @@ class Keyring {
         if (this.get() !== password) throw new Error(this.platform === "linux" ? "Secret Service readback failed" : "Keychain readback failed");
         return this.describe();
     }
+    // Writes only when the stored password is missing or different, so an unlock with the
+    // remembered password reads the item instead of replacing it.
+    ensure(password) {
+        if (this.get() !== password) this.set(password);
+    }
     clear() {
         if (this.describe().secure) this.call("delete");
     }

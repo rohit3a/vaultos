@@ -235,3 +235,25 @@ test('rotation reports a Keychain failure while completing backup re-encryption'
     store.keyring={describe:()=>({store:'unavailable'}),clear:()=>{throw new Error('synthetic unavailable');}};
     const result=store.changePassword(PW,'synthetic-new-password');assert.equal(result.warnings.length,1);assert.equal(result.backups[0].status,'re-encrypted');assert(decryptVault(JSON.parse(fs.readFileSync(backup)),'synthetic-new-password'));
 });
+
+test("history drops its oldest entries past 1 MB and stays revertible", t => {
+    const {store: store} = fixture(t);
+    const big = "x".repeat(4e4);
+    for (let i = 0; i < 60; i++) store.record("synthetic", {
+        before: big + i,
+        after: big + i
+    });
+    store.persist();
+    const h = store.vault.history;
+    assert(Buffer.byteLength(JSON.stringify(h)) <= 1 << 20);
+    assert(h.length > 1 && h.length < 60);
+    assert.equal(h.at(-1).after, big + 59);
+    const reopened = new Store(store.dataDir);
+    reopened.unlock(PW);
+    assert.equal(reopened.vault.history.length, h.length);
+    store.setSecret("Example", {
+        key: "AFTER_TRIM",
+        value: "synthetic"
+    });
+    assert.equal(store.listHistory(1)[0].key, "AFTER_TRIM");
+});

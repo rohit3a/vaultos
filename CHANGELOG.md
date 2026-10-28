@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Storage: history is capped at 1 MB as well as 2,000 entries, dropping the oldest first, so large values no longer grow the vault without limit. Revert still works for the entries kept.
+- Sync: the vault copies a pull writes to `backups/` are pruned to the newest 20 plus any from the last 30 days. Other files in `backups/` are left alone.
+- Keychain: an unlock with remembering on rewrites the stored password only when it is missing or different, instead of on every unlock.
 - Desktop: the app is named VaultOS (VaultOS.app on macOS) instead of VaultOS Preview. The data directory, Keychain and Secret Service names, bundle identifier and Linux install paths keep their `VaultOS-Preview` and `org.vaultos.preview` names, so existing vaults and remembered passwords carry over.
 - Desktop: a plain interface. The platform's own font, neutral greys with one blue accent, compact controls and hairline borders replace the mascot, the rounded display font, the cream-and-orange palette and the large pill buttons. No web fonts are bundled or loaded any more (about 124 KB less), and the renderer CSP now sets `font-src 'none'`.
 - Sync: a pull decrypts only sync files it has not already read. Every pull used to run `age` once per record; repeating a pull of 200 unchanged records went from about 840 ms to 36 ms.

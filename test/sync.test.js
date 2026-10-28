@@ -4,7 +4,7 @@ const {test: test} = require("node:test"), assert = require("node:assert/strict"
 
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 
-const {Store: Store} = require("../store"), {Sync: Sync, findTool: findTool} = require("../sync");
+const {Store: Store} = require("../store"), {Sync: Sync, findTool: findTool, pruneBackups: pruneBackups} = require("../sync");
 
 function make(t) {
     const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "vaultos-sync-test-"));
@@ -507,4 +507,23 @@ test("sync finds age where installers put it when PATH lacks it (the Dock's PATH
         pathEnv: "",
         extraDirs: [ bin ]
     }), "not-executable");
+});
+
+test("pull backups keep the newest 20 and the last 30 days, and leave other files alone", t => {
+    const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "vaultos-backups-"));
+    t.after(() => fs.rmSync(dir, {
+        recursive: true,
+        force: true
+    }));
+    const now = Date.UTC(2026, 0, 31), day = 864e5;
+    const name = (ms, i) => `${ms}-${i.toString(16).padStart(16, "0")}.enc`;
+    for (let i = 0; i < 25; i++) fs.writeFileSync(path.join(dir, name(now - (40 + i) * day, i)), "synthetic");
+    for (let i = 0; i < 5; i++) fs.writeFileSync(path.join(dir, name(now - i * day, 100 + i)), "synthetic");
+    fs.writeFileSync(path.join(dir, "vault-2025-01-01.enc"), "synthetic");
+    pruneBackups(dir, now);
+    const left = fs.readdirSync(dir);
+    assert.equal(left.length, 21);
+    assert(left.includes("vault-2025-01-01.enc"));
+    for (let i = 0; i < 5; i++) assert(left.includes(name(now - i * day, 100 + i)));
+    for (let i = 0; i < 15; i++) assert(left.includes(name(now - (40 + i) * day, i)));
 });

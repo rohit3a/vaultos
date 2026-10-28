@@ -66,6 +66,25 @@ const remoteQueues = new Map;
 // entries it used.
 const decrypted = new WeakMap;
 
+// A pull that changes the vault first copies vault.enc to backups/<ms>-<id>.enc. The newest
+// BACKUPS_KEPT of those, and any younger than BACKUP_DAYS, are kept; other files there are
+// never touched.
+const PULL_BACKUP = /^(\d+)-[a-f0-9]{16}\.enc$/;
+
+const BACKUPS_KEPT = 20;
+
+const BACKUP_DAYS = 30;
+
+const pruneBackups = (dir, now = Date.now()) => {
+    const old = fs.readdirSync(dir).map(name => ({
+        name: name,
+        ms: Number(PULL_BACKUP.exec(name)?.[1])
+    })).filter(b => b.ms).sort((x, y) => y.ms - x.ms).slice(BACKUPS_KEPT).filter(b => now - b.ms > BACKUP_DAYS * 864e5);
+    for (const b of old) fs.rmSync(path.join(dir, b.name), {
+        force: true
+    });
+};
+
 function serialized(repo, fn) {
     const next = (remoteQueues.get(repo) || Promise.resolve()).then(() => fn());
     const settled = next.then(() => {}, () => {});
@@ -908,6 +927,9 @@ class Sync {
                 mode: 448
             });
             atomicWrite(path.join(backupDir, Date.now() + "-" + randomId() + ".enc"), fs.readFileSync(this.store.vaultPath));
+            try {
+                pruneBackups(backupDir);
+            } catch {}
         }
         const rollback = JSON.parse(JSON.stringify(this.store.vault));
         try {
@@ -1092,5 +1114,6 @@ class Sync {
 module.exports = {
     Sync: Sync,
     opaque: opaque,
-    findTool: findTool
+    findTool: findTool,
+    pruneBackups: pruneBackups
 };

@@ -39,6 +39,10 @@ const diskStat = file => {
 
 const AUTO_SYNC_DEFAULT_SECONDS = 120;
 
+// History keeps each change's before and after values so it can be reverted. Past this size
+// the oldest entries are dropped, as they are past 2,000 entries.
+const HISTORY_BYTES = 1 << 20;
+
 function expiryInfo(expiresAt) {
     if (!expiresAt) return {
         expiryStatus: "none",
@@ -92,7 +96,7 @@ class Store {
         this.persist();
         if (this.vault.settings.rememberPassword === true) {
             try {
-                this.keyring.set(password);
+                this.keyring.ensure(password);
             } catch {}
         }
     }
@@ -111,7 +115,7 @@ class Store {
         this.savedVault = clone(vault);
         if (this.vault.settings.rememberPassword === true) {
             try {
-                this.keyring.set(password);
+                this.keyring.ensure(password);
             } catch {}
         }
         if (migrated) {
@@ -325,6 +329,10 @@ class Store {
             this.batchDirty = true;
             return;
         }
+        if (this.historyGrew) {
+            this.historyGrew = false;
+            this.trimHistory();
+        }
         let releaseWrite;
         try {
             releaseWrite = require("./session").claim(this.dataDir, "write.lock");
@@ -420,6 +428,13 @@ class Store {
             reverted: false
         });
         if (this.vault.history.length > 2e3) this.vault.history.splice(0, this.vault.history.length - 2e3);
+        this.historyGrew = true;
+    }
+    trimHistory() {
+        const h = this.vault.history || [];
+        let size = Buffer.byteLength(JSON.stringify(h)), drop = 0;
+        while (size > HISTORY_BYTES && drop < h.length - 1) size -= Buffer.byteLength(JSON.stringify(h[drop++])) + 1;
+        if (drop) h.splice(0, drop);
     }
     listHistory(limit = 500) {
         const h = (this.vault.history || []).slice().reverse();

@@ -12,6 +12,8 @@ node cli.cjs backup /absolute/new/backup-directory
 
 This copies only the encrypted vault. The command overwrites `vault.enc` in the chosen directory, so choose a new dated directory for each snapshot. You must retain the corresponding passphrase. Do not send backups in bug reports or commit them to the public source repository.
 
+A pull that changes the vault also keeps its own copy of `vault.enc` in `backups/` inside the data directory. Only the newest 20 of those, plus any from the last 30 days, are kept, so they do not replace your own dated backups. Other files you place in `backups/` are never deleted.
+
 Sync users additionally need the whole private preview data directory for their machine identity, signing key and replay state. This directory includes sensitive local keys and audit metadata; encrypt the backup itself. Avoid restoring the same machine identity on two simultaneously active devices. Enroll a new machine for a new installation.
 
 ## Test recovery without touching a working vault
