@@ -199,6 +199,7 @@ test("autosync pauses while the vault is locked and resumes after unlock", async
     await until(() => auto.status().state === "OK");
     a.lock();
     auto.pause();
+    await until(() => !auto.status().running);
     const attempted = auto.status().lastAttemptAt, runs = auto.runs;
     assert.equal(auto.status().state, "PAUSED_LOCKED");
     await sleep(600);

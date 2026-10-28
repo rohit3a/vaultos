@@ -189,6 +189,8 @@ class AutoSync {
                 peerStalled: problems.length > 0,
                 peerProblems: problems
             };
+            // The vault locked after the round's last check: report the pause, not the round.
+            if (!this.store.isUnlocked()) this.state.state = "PAUSED_LOCKED";
             if (manual) this.halted = false;
             if (failure && !retried) this.halt(failure, this.state.error); else if (manual && wasHalted) this.refresh();
             if (pulled.added.length || pulled.updated.length || pulled.deleted.length || pushed.written) this.log(`synced: +${pulled.added.length} ~${pulled.updated.length} -${pulled.deleted.length} in, ${pushed.written || 0} out`);
