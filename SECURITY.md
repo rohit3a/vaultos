@@ -6,7 +6,7 @@ Please use [GitHub private vulnerability reporting](https://github.com/rohit3a/v
 
 ## What VaultOS protects
 
-- A copied, locked `vault.enc` requires its passphrase to decrypt. Writes use authenticated AES-256-GCM with a fresh 16-byte salt and 12-byte nonce; the envelope includes a 16-byte authentication tag.
+- A copied, locked `vault.enc` requires its passphrase to decrypt. Writes use authenticated AES-256-GCM with a fresh 12-byte nonce; the envelope includes a 16-byte authentication tag. The 16-byte salt is random when a password is set or changed. While unlocked, a process keeps the derived key for the vault's current salt and reuses both for its writes, so a save does not repeat the scrypt derivation. Lock zeroes that key buffer; changing the password picks a new salt.
 - Envelope v2 derives a 256-bit key with scrypt (`N=131072`, `r=8`, `p=1`, maximum memory 256 MiB). Older envelope v1 can be read with its original `N=32768`; a new write uses v2. Vault schema v3 rejects unsupported newer readers/writers. A strong unique passphrase remains essential against offline guessing.
 - The Electron renderer has a sandbox, context isolation, no Node integration, a restrictive CSP, denied navigation/popups/permissions, and an IPC sender-and-unlock check. Packaged fuses disable RunAsNode, Node options and inspection arguments, and require the embedded application archive.
 - The local HTTP service binds only to `127.0.0.1`. Private routes require a random session token and an enrolled agent token; browser-origin requests and unexpected Host headers are rejected. Project, folder, scope, and record ownership checks apply at the service boundary. Request sizes and timeouts are bounded.

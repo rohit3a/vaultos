@@ -443,19 +443,19 @@ handle("audit", limit => store.readAudit(limit));
 
 const sync = () => new (require("./sync").Sync)(store, syncRepo(store));
 
-handle("syncStatus", () => ({
-    ...sync().statusRemote(),
+handle("syncStatus", async () => ({
+    ...await sync().statusRemote(),
     autoSync: autoSync ? autoSync.status() : null
 }));
 
-handle("syncPush", () => {
-    const r = sync().pushRemote();
+handle("syncPush", async () => {
+    const r = await sync().pushRemote();
     if (autoSync && r.delivered) autoSync.clearHalt();
     return r;
 });
 
-handle("syncPull", accept => {
-    const r = sync().pullRemote({
+handle("syncPull", async accept => {
+    const r = await sync().pullRemote({
         acceptConflicts: accept === true
     });
     if (autoSync) autoSync.clearHalt();

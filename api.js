@@ -73,19 +73,18 @@ function startApi(store, {onShutdown: onShutdown = null, autoSync: autoSync = nu
             if (!autoSync) return send(404, {
                 error: "Not found"
             });
-            try {
-                const result = autoSync.run({
-                    manual: true
-                });
-                return send(200, {
-                    ok: result.state === "OK",
-                    ...result
-                });
-            } catch (e) {
-                return send(e.status || 409, {
-                    error: e.message
-                });
-            }
+            // The round now waits on git without blocking, so the 15 s idle timeout would cut it
+            // off; allow as long as the client waits.
+            req.socket.setTimeout(13e4);
+            autoSync.run({
+                manual: true
+            }).then(result => send(200, {
+                ok: result.state === "OK",
+                ...result
+            }), e => send(e.status || 409, {
+                error: e.message
+            }));
+            return;
         }
         if (!store.isUnlocked()) return send(423, {
             error: "Vault is locked. Unlock the app."

@@ -4,7 +4,7 @@ const {test: test} = require("node:test"), assert = require("node:assert/strict"
 
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 
-const {Store: Store} = require("../store"), {Agents: Agents} = require("../agents"), {encryptVault: encryptVault, decryptVault: decryptVault} = require("../crypto");
+const {Store: Store} = require("../store"), {Agents: Agents} = require("../agents"), {encryptVault: encryptVault, decryptVault: decryptVault, forgetKey: forgetKey} = require("../crypto");
 
 const {writeEnv: writeEnv} = require("../env-file");
 
@@ -48,6 +48,39 @@ test("encrypted persistence rejects wrong password, tampering and invalid envelo
     assert.equal(other.revealSecret("Example", "API_KEY").value, "synthetic-private-value");
     assert(!fs.existsSync(path.join(store.dataDir, "backend.key")));
     assert.equal(fs.statSync(store.vaultPath).mode & 511, 384);
+});
+
+test("writes reuse the unlocked key with a fresh nonce, never for another password or after lock", t => {
+    const cache = {};
+    const first = encryptVault({
+        n: 1
+    }, PW, cache), second = encryptVault({
+        n: 2
+    }, PW, cache);
+    assert.equal(second.salt, first.salt);
+    assert.notEqual(second.iv, first.iv);
+    assert.equal(decryptVault(second, PW).n, 2);
+    assert.throws(() => decryptVault(second, "wrong-synthetic-password", cache));
+    assert.equal(encryptVault({}, PW, cache).salt, first.salt);
+    assert.notEqual(encryptVault({}, "another-synthetic-password", cache).salt, first.salt);
+    forgetKey(cache);
+    assert.equal(cache.key, null);
+    assert.notEqual(encryptVault({}, PW, cache).salt, first.salt);
+    const {store: store} = fixture(t);
+    const salt = () => JSON.parse(fs.readFileSync(store.vaultPath, "utf8")).salt, before = salt();
+    store.setSecret("Example", {
+        key: "K",
+        value: "synthetic"
+    });
+    assert.equal(salt(), before);
+    store.lock();
+    assert.equal(store.keyCache.key, null);
+    assert.throws(() => store.unlock("wrong-synthetic-password"));
+    store.unlock(PW);
+    assert.equal(store.revealSecret("Example", "K").value, "synthetic");
+    store.changePassword(PW, "another-synthetic-password");
+    assert.notEqual(salt(), before);
+    assert.throws(() => decryptVault(JSON.parse(fs.readFileSync(store.vaultPath, "utf8")), PW));
 });
 
 test("project lookup is exact, updates validate fields and agent ownership holds", t => {

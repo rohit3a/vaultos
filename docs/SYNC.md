@@ -25,6 +25,8 @@ An approved change to `recipients.txt` triggers re-encryption on the next push, 
 
 `sync status` fetches and reports transport and record drift. `sync push` encrypts changed records, signs ciphertext digests, commits only known sync paths, pushes, and checks the remote ref. `sync pull` fetches before verification/merge. Status exits 2 unless fully in sync; failed deliveries also exit 2 for automation.
 
+Over SSH, one round's fetch, push and verifying fetch share a single connection. VaultOS runs `ssh` with `ControlMaster=auto`, `ControlPersist=300` and a control socket in a private (mode 0700) `vaultos-ssh-<uid>` folder under the system temporary directory, so the next round within five minutes reuses it too. It skips this when you set `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand`, which also lets you turn it off, and when that folder is not private to you.
+
 If content differs, inspect `sync plan` (local checkout only; fetch separately first) or the desktop's status/conflict output. A record changed on only one device since the last sync, with a higher revision, merges as an ordinary update. A record changed on both devices, or any case the sync index cannot vouch for, is treated as a conflict. Back up both devices, review the proposed winner (the higher revision, then the later timestamp; an exact tie goes to the same version on every device), and use `sync accept-conflicts` only if you accept that choice. A local version that wins is published by your next `sync push`. The app stores an encrypted local backup before merging. Conflicting project/key names refuse merging instead of silently overwriting.
 
 ## Automatic sync

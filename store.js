@@ -4,7 +4,7 @@ const fs = require("node:fs");
 
 const path = require("node:path");
 
-const {encryptVault: encryptVault, decryptVault: decryptVault, randomId: randomId, contentHash: contentHash} = require("./crypto");
+const {encryptVault: encryptVault, decryptVault: decryptVault, forgetKey: forgetKey, randomId: randomId, contentHash: contentHash} = require("./crypto");
 
 const providers = require("./providers");
 
@@ -61,6 +61,7 @@ class Store {
         this.sessionPath = path.join(dataDir, "session.json");
         this.auditPath = path.join(dataDir, "audit.log");
         this.password = null;
+        this.keyCache = {};
         this.vault = null;
         privateDir(dataDir);
         this.diskHash = null;
@@ -100,7 +101,7 @@ class Store {
         const stat = diskStat(this.vaultPath);
         const bytes = fs.readFileSync(this.vaultPath, "utf8");
         const envelope = JSON.parse(bytes);
-        const raw = decryptVault(envelope, password);
+        const raw = decryptVault(envelope, password, this.keyCache);
         M.assertReadable(raw);
         const {vault: vault, migrated: migrated, changed: changed} = M.migrate(raw);
         this.vault = vault;
@@ -131,6 +132,7 @@ class Store {
     lock() {
         this.vault = null;
         this.password = null;
+        forgetKey(this.keyCache);
         this.savedVault = null;
     }
     changePassword(oldPassword, newPassword, {reencryptBackups: reencryptBackups = true} = {}) {
@@ -281,7 +283,7 @@ class Store {
             regularFile(this.vaultPath);
             const stat = diskStat(this.vaultPath);
             const bytes = fs.readFileSync(this.vaultPath, "utf8");
-            const raw = decryptVault(JSON.parse(bytes), this.password);
+            const raw = decryptVault(JSON.parse(bytes), this.password, this.keyCache);
             M.assertReadable(raw);
             const seen = new Map((this.vault.agents || []).map(a => [ a.id, a.lastSeenAt ]));
             const {vault: vault} = M.migrate(raw);
@@ -307,7 +309,7 @@ class Store {
                 stale.status = 409;
                 throw stale;
             }
-            const bytes = JSON.stringify(encryptVault(this.vault, this.password));
+            const bytes = JSON.stringify(encryptVault(this.vault, this.password, this.keyCache));
             atomicWrite(this.vaultPath, bytes);
             this.diskHash = createHash("sha256").update(bytes).digest("hex");
             this.diskStat = diskStat(this.vaultPath);

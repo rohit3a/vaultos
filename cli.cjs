@@ -85,12 +85,12 @@ async function main() {
                 break;
 
               case "status":
-                result = sync.statusRemote();
+                result = await sync.statusRemote();
                 if (result.state !== "IN_SYNC") process.exitCode = 2;
                 break;
 
               case "push":
-                result = sync.pushRemote();
+                result = await sync.pushRemote();
                 if (!result.delivered) process.exitCode = 2;
                 break;
 
@@ -117,7 +117,7 @@ async function main() {
               case "pull":
               case "accept-conflicts":
                 {
-                    const p = sync.pullRemote({
+                    const p = await sync.pullRemote({
                         acceptConflicts: rest[0] === "accept-conflicts"
                     });
                     result = {

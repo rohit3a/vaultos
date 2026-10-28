@@ -269,7 +269,7 @@ test("new approved recipients receive re-encrypted existing records", t => {
     assert.equal(c.revealSecret("Example", "K").value, "existing-synthetic");
 });
 
-test("Git transport verifies a real remote receipt and refuses unrelated changes", t => {
+test("Git transport verifies a real remote receipt and refuses unrelated changes", async t => {
     const {a: a, sa: sa, repo: repo, dir: dir} = make(t), {execFileSync: execFileSync} = require("node:child_process");
     const git = (...args) => execFileSync("git", args, {
         stdio: "pipe",
@@ -289,15 +289,15 @@ test("Git transport verifies a real remote receipt and refuses unrelated changes
         key: "K",
         value: "transport-synthetic"
     });
-    const result = sa.pushRemote();
+    const result = await sa.pushRemote();
     assert(result.delivered, JSON.stringify(result));
     assert.equal(result.remoteCommit, result.sourceCommit);
     // A file only this checkout has is left alone: not published, not deleted, not a reason to stop.
     fs.writeFileSync(path.join(repo, "unrelated.txt"), "must not publish");
-    assert(sa.pushRemote().delivered);
+    assert((await sa.pushRemote()).delivered);
     // Once it is given to Git, it is a change to the sync repository that sync did not make.
     git("-C", repo, "add", "unrelated.txt");
-    assert.throws(() => sa.pushRemote(), /unrelated changes; refusing to commit: "unrelated\.txt"/);
+    await assert.rejects(sa.pushRemote(), /unrelated changes; refusing to commit: "unrelated\.txt"/);
     assert(!git("--git-dir", remote, "ls-tree", "--name-only", "HEAD").toString().includes("unrelated"));
     assert(fs.existsSync(path.join(repo, "unrelated.txt")));
 });
@@ -346,6 +346,81 @@ test("CLI sync pull prints why it stopped, and keeps file errors generic", async
     assert.equal(trusted.code, 1);
     assert.match(trusted.output, /File operation failed; check permissions and paths/);
     assert(!trusted.output.includes(missing), "file errors do not print paths");
+});
+
+test("a slow remote leaves the process responsive, and overlapping remote rounds run one at a time", async t => {
+    const {a: a, sa: sa, repo: repo, dir: dir} = make(t), {execFileSync: execFileSync} = require("node:child_process");
+    const git = (...args) => execFileSync("git", args, {
+        stdio: "pipe"
+    });
+    const remote = path.join(dir, "remote.git"), slow = path.join(dir, "slow-ssh");
+    // A stand-in for SSH that takes 300 ms to connect, then runs git's command locally.
+    fs.writeFileSync(slow, '#!/bin/sh\nsleep 0.3\nshift\nexec sh -c "$1"\n', {
+        mode: 448
+    });
+    const saved = [ process.env.GIT_SSH_COMMAND, process.env.GIT_SSH_VARIANT ];
+    process.env.GIT_SSH_COMMAND = slow;
+    process.env.GIT_SSH_VARIANT = "simple";
+    t.after(() => {
+        for (const [i, name] of [ "GIT_SSH_COMMAND", "GIT_SSH_VARIANT" ].entries()) if (saved[i] === undefined) delete process.env[name]; else process.env[name] = saved[i];
+    });
+    git("init", "--bare", "--initial-branch=main", remote);
+    git("-C", repo, "init", "-b", "main");
+    git("-C", repo, "config", "user.name", "Synthetic Test");
+    git("-C", repo, "config", "user.email", "test@example.invalid");
+    git("-C", repo, "remote", "add", "origin", `slowhost:${remote}`);
+    a.createProject("Example");
+    a.setSecret("Example", {
+        key: "K",
+        value: "slow-remote-synthetic"
+    });
+    const other = new Sync(a, repo);
+    let active = 0, most = 0, ticks = 0;
+    for (const s of [ sa, other ]) {
+        const push = s.git.push.bind(s.git);
+        s.git.push = async () => {
+            most = Math.max(most, ++active);
+            try {
+                return await push();
+            } finally {
+                active--;
+            }
+        };
+    }
+    const timer = setInterval(() => ticks++, 20);
+    const results = await Promise.all([ sa.pushRemote(), other.pushRemote() ]);
+    clearInterval(timer);
+    for (const r of results) assert(r.delivered, JSON.stringify(r));
+    assert.equal(most, 1);
+    assert(ticks >= 10, `event loop ticked ${ticks} times during the slow pushes`);
+});
+
+test("SSH connection reuse uses a private socket directory and yields to the user's own SSH setup", {
+    skip: process.platform === "win32"
+}, async t => {
+    const {repo: repo} = make(t), {execFileSync: execFileSync} = require("node:child_process"), {sshReuseEnv: sshReuseEnv} = require("../git");
+    const git = (...args) => execFileSync("git", [ "-C", repo, ...args ], {
+        stdio: "pipe"
+    });
+    const saved = process.env.GIT_SSH_COMMAND;
+    delete process.env.GIT_SSH_COMMAND;
+    t.after(() => {
+        if (saved !== undefined) process.env.GIT_SSH_COMMAND = saved;
+    });
+    git("init", "-b", "main");
+    git("remote", "add", "origin", "git@example.invalid:synthetic/vault.git");
+    const env = await sshReuseEnv(repo, "origin");
+    const socket = /ControlPath=(\S+)$/.exec(env.GIT_SSH_COMMAND || "")?.[1];
+    assert(socket, JSON.stringify(env));
+    const st = fs.statSync(path.dirname(socket));
+    assert.equal(st.mode & 511, 448);
+    assert.equal(st.uid, process.getuid());
+    assert.match(env.GIT_SSH_COMMAND, /ControlMaster=auto/);
+    git("config", "core.sshCommand", "ssh -i /synthetic/key");
+    assert.deepEqual(await sshReuseEnv(repo, "origin"), {});
+    git("config", "--unset", "core.sshCommand");
+    process.env.GIT_SSH_COMMAND = "ssh -v";
+    assert.deepEqual(await sshReuseEnv(repo, "origin"), {});
 });
 
 test("sync finds age where installers put it when PATH lacks it (the Dock's PATH on macOS)", {
