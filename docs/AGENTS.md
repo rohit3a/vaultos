@@ -6,7 +6,7 @@ when installing it in a skill-aware client; this page is the shorter manual setu
 
 The desktop manages authorization. The MCP bridge forwards calls to its localhost API. You need Node.js 22+ and a source checkout with `npm ci --omit=dev --ignore-scripts` for the bridge; the desktop ZIP alone does not install a global MCP command.
 
-1. Open and unlock VaultOS Preview. Create a project and a disposable test key.
+1. Open and unlock VaultOS. Create a project and a disposable test key.
 2. In Settings → Agents, enroll the tool. Select `read` and `inject`, that project's checkbox, and its output folder. Additional scopes grant additional authority; leave `reveal` off unless you deliberately want raw secrets in model context.
 3. Copy the one-time agent token into a private file outside the project repository. Create its parent folder with mode 0700 and the file with mode 0600. Use an editor; do not paste it into shell history or commit it. If lost, reissue it in the desktop; the old token stops working.
 4. Add an MCP stdio server to your client's configuration. Replace paths with your actual absolute paths. The example contains no live token:

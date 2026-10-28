@@ -4,7 +4,7 @@ This is an **unsigned evaluation preview**. The macOS app has an ad-hoc integrit
 
 ## Downloads
 
-- macOS `arm64` (Apple Silicon) and `x64` (Intel) ZIPs with **VaultOS Preview.app**. Deployment target: macOS 13+.
+- macOS `arm64` (Apple Silicon) and `x64` (Intel) ZIPs with **VaultOS.app**. Deployment target: macOS 13+.
 - Linux `x64` tarball. Install it per user with `scripts/install-linux.sh --from <tarball>` from a source checkout; see the README.
 - Verify the matching `.sha256` before opening. A CycloneDX JSON dependency inventory is attached for each build.
 - Builds use a separate preview data, Keychain and Secret Service namespace. Nothing installs a login service or imports another vault on its own.

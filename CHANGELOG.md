@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Desktop: the app is named VaultOS (VaultOS.app on macOS) instead of VaultOS Preview. The data directory, Keychain and Secret Service names, bundle identifier and Linux install paths keep their `VaultOS-Preview` and `org.vaultos.preview` names, so existing vaults and remembered passwords carry over.
 - Desktop: a plain interface. The platform's own font, neutral greys with one blue accent, compact controls and hairline borders replace the mascot, the rounded display font, the cream-and-orange palette and the large pill buttons. No web fonts are bundled or loaded any more (about 124 KB less), and the renderer CSP now sets `font-src 'none'`.
 - Sync: a pull decrypts only sync files it has not already read. Every pull used to run `age` once per record; repeating a pull of 200 unchanged records went from about 840 ms to 36 ms.
 - Performance: an .env import saves the vault once instead of once per key (200 keys: about 1.8 s to 14 ms), **Approve all** approves every pending key in one confirmed save, password rotation derives each backup key once instead of twice per file, and a sync round asks Git for its branch and remote once.

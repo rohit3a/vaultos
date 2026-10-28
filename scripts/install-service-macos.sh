@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install or remove a per-user LaunchAgent that runs `backend.cjs --service`, the optional
-# always-on VaultOS Preview owner. Nothing runs this automatically.
+# always-on VaultOS owner. Nothing runs this automatically.
 #
 # The service uses Node.js and the same source checkout as the MCP bridge. The packaged app
 # cannot run backend.cjs itself: its Electron fuses disable RunAsNode. The service starts

@@ -108,7 +108,7 @@ class Keyring {
         const attributes = [ "service", this.service, "account", ACCOUNT ];
         const args = {
             get: [ "lookup", ...attributes ],
-            set: [ "store", "--label=VaultOS Preview master password", ...attributes ],
+            set: [ "store", "--label=VaultOS master password", ...attributes ],
             delete: [ "clear", ...attributes ]
         }[action];
         if (!args) throw new Error("Unknown keyring action");

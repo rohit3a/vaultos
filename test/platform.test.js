@@ -69,7 +69,7 @@ test("Linux keyring stores, reads and clears through secret-tool without argv se
     const argv = fs.readFileSync(path.join(secrets, "argv.log"), "utf8");
     assert(!argv.includes(PW));
     assert(argv.includes(`lookup service ${keyring.service} account master-password`));
-    assert(argv.includes(`store --label=VaultOS Preview master password service ${keyring.service} account master-password`));
+    assert(argv.includes(`store --label=VaultOS master password service ${keyring.service} account master-password`));
     const other = new Keyring(path.join(dir, "other"), {
         platform: "linux",
         env: env

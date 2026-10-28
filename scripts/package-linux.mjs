@@ -41,7 +41,7 @@ try {
     });
     const [built] = await packager({
         dir: stage,
-        name: "VaultOS Preview",
+        name: "VaultOS",
         executableName: executable,
         platform: "linux",
         arch: arch,

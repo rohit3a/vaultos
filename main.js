@@ -28,7 +28,7 @@ const M = require("./model");
 
 const {HumanAuth: HumanAuth, touchIdUnlockStatus: touchIdUnlockStatus, weakensSecurity: weakensSecurity, checkTouchIdPatch: checkTouchIdPatch} = require("./human-auth");
 
-app.setName("VaultOS Preview");
+app.setName("VaultOS");
 
 app.setPath("userData", path.join(defaultDataDir(), "desktop"));
 
@@ -140,7 +140,7 @@ let owning = null, serving = null;
 function own() {
     if (release) return Promise.resolve();
     if (!owning) owning = (async () => {
-        if (!await requestShutdown(store.sessionPath)) throw new Error("Close the other VaultOS Preview instance before unlocking");
+        if (!await requestShutdown(store.sessionPath)) throw new Error("Close the other VaultOS instance before unlocking");
         if (!release) release = claim(store.dataDir);
     })().finally(() => {
         owning = null;
@@ -152,7 +152,7 @@ function serve() {
     if (api) return Promise.resolve();
     if (!serving) serving = (async () => {
         const sync = new AutoSync(store, {
-            log: m => console.error(`VaultOS Preview: ${m}`)
+            log: m => console.error(`VaultOS: ${m}`)
         });
         const started = await startApi(store, {
             autoSync: sync
@@ -530,7 +530,7 @@ function window() {
         height: 740,
         minWidth: 380,
         minHeight: 500,
-        title: "VaultOS Preview",
+        title: "VaultOS",
         backgroundColor: "#0d0d0d",
         show: false,
         ...process.platform === "darwin" ? {

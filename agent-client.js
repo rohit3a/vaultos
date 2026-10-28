@@ -18,11 +18,11 @@ const STALE_START_MS = 3e4;
 
 const MESSAGES = {
     noToken: "No agent token is configured. Ask the human to enroll this agent in VaultOS and set VAULTOS_AGENT_TOKEN_FILE (or VAULTOS_AGENT with a per-agent token file).",
-    locked: "VaultOS is running but locked. Ask the human to unlock VaultOS Preview; do not retry in a loop.",
-    humanLocked: "VaultOS was locked by a human, which blocks background start. Ask the human to open and unlock VaultOS Preview; do not retry in a loop.",
-    notRunning: "VaultOS is not running and could not be started. Ask the human to open and unlock VaultOS Preview; background start works only when background access is enabled in Settings.",
-    noBackground: "VaultOS is not running and could not unlock in the background (background access is off or the Keychain helper is unavailable). Ask the human to open and unlock VaultOS Preview.",
-    noVault: "No VaultOS vault exists in this data directory. Check VAULTOS_DATA_DIR or ask the human to create the vault in VaultOS Preview.",
+    locked: "VaultOS is running but locked. Ask the human to unlock VaultOS; do not retry in a loop.",
+    humanLocked: "VaultOS was locked by a human, which blocks background start. Ask the human to open and unlock VaultOS; do not retry in a loop.",
+    notRunning: "VaultOS is not running and could not be started. Ask the human to open and unlock VaultOS; background start works only when background access is enabled in Settings.",
+    noBackground: "VaultOS is not running and could not unlock in the background (background access is off or the Keychain helper is unavailable). Ask the human to open and unlock VaultOS.",
+    noVault: "No VaultOS vault exists in this data directory. Check VAULTOS_DATA_DIR or ask the human to create the vault in VaultOS.",
     interrupted: "Connection interrupted. Check the operation result before retrying a write"
 };
 
